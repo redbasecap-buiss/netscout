@@ -1,0 +1,16 @@
+[package]
+name = "netscout-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal UI dashboard for netscout"
+
+[[bin]]
+name = "netscout-tui"
+path = "src/main.rs"
+
+[dependencies]
+netscout-core = { path = "../netscout-core" }
+ratatui = "0.29"
+crossterm = "0.28"
+tokio = { version = "1", features = ["full"] }

@@ -1,0 +1,17 @@
+[package]
+name = "netscout-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for netscout network diagnostic toolkit"
+
+[[bin]]
+name = "netscout"
+path = "src/main.rs"
+
+[dependencies]
+netscout-core = { path = "../netscout-core" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+colored = "2"
+serde_json = "1"
