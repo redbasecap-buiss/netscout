@@ -119,6 +119,12 @@ enum Commands {
         /// Domain or IP to query
         target: String,
     },
+    /// List network interfaces
+    Netif {
+        /// Show only interfaces that are UP
+        #[arg(long)]
+        up_only: bool,
+    },
     /// Scan a LAN subnet for hosts
     Scan {
         /// Subnet in CIDR notation (e.g., 192.168.1.0/24)
@@ -379,6 +385,13 @@ async fn main() -> Result<(), String> {
                 }
             })
         }
+        Commands::Netif { up_only } => netscout_core::netif::list_interfaces().map(|mut r| {
+            if up_only {
+                r.interfaces.retain(|i| i.is_up);
+                r.total = r.interfaces.len();
+            }
+            format_output(&r, format)
+        }),
         Commands::Scan {
             subnet,
             ports,

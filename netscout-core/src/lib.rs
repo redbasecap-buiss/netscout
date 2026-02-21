@@ -1,6 +1,7 @@
 pub mod cert;
 pub mod dns;
 pub mod http;
+pub mod netif;
 pub mod output;
 pub mod ping;
 pub mod port;
