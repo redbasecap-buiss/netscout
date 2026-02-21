@@ -1,0 +1,60 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get release info
+        id: release
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          SHA=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: redbasecap-buiss/homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+
+      - name: Update formula
+        run: |
+          cat > Formula/netscout.rb << 'FORMULA'
+          class Netscout < Formula
+            desc "10-in-1 network diagnostics toolkit written in Rust"
+            homepage "https://github.com/redbasecap-buiss/netscout"
+            url "${{ steps.release.outputs.url }}"
+            sha256 "${{ steps.release.outputs.sha256 }}"
+            license "MIT"
+
+            depends_on "rust" => :build
+
+            def install
+              system "cargo", "install", *std_cargo_args(path: "netscout-cli")
+            end
+
+            test do
+              output = shell_output("#{bin}/netscout dns google.com 2>&1", 0)
+              assert_match "google.com", output
+            end
+          end
+          FORMULA
+          # Fix indentation
+          sed -i 's/^          //' Formula/netscout.rb
+
+      - name: Commit and push
+        run: |
+          git config user.name "Nicola Spieser"
+          git config user.email "redbasecap-buiss@users.noreply.github.com"
+          git add Formula/netscout.rb
+          git commit -m "netscout ${{ steps.release.outputs.tag }}"
+          git push
