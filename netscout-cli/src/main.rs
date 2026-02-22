@@ -220,38 +220,9 @@ async fn main() -> Result<(), String> {
                 timeout: Duration::from_millis(timeout),
                 ..Default::default()
             };
-            netscout_core::trace::trace(&config).await.map(|r| {
-                if format == OutputFormat::Json {
-                    serde_json::to_string_pretty(&r).unwrap()
-                } else {
-                    let mut out = format!(
-                        "{} {} ({})\n",
-                        "TRACEROUTE".yellow().bold(),
-                        r.target,
-                        r.resolved_addr,
-                    );
-                    for hop in &r.hops {
-                        if hop.timed_out {
-                            out.push_str(&format!("  {:>2}  {}\n", hop.hop, "* * *".dimmed()));
-                        } else {
-                            let addr = hop.addr.as_deref().unwrap_or("???");
-                            let name = hop
-                                .hostname
-                                .as_deref()
-                                .map(|h| format!(" ({h})"))
-                                .unwrap_or_default();
-                            let rtt = hop.rtt_ms.map(|r| format!("{r:.2} ms")).unwrap_or_default();
-                            out.push_str(&format!("  {:>2}  {addr}{name}  {rtt}\n", hop.hop));
-                        }
-                    }
-                    if r.reached {
-                        out.push_str(&format!("  {}\n", "Destination reached.".green()));
-                    } else {
-                        out.push_str(&format!("  {}\n", "Destination not reached.".red()));
-                    }
-                    out
-                }
-            })
+            netscout_core::trace::trace(&config)
+                .await
+                .map(|r| format_output(&r, format))
         }
         Commands::Http {
             url,
@@ -273,31 +244,7 @@ async fn main() -> Result<(), String> {
                 follow_redirects: follow,
                 ..Default::default()
             };
-            netscout_core::http::probe(&config).map(|r| {
-                if format == OutputFormat::Json {
-                    serde_json::to_string_pretty(&r).unwrap()
-                } else {
-                    let mut out = format!("{} {} {}\n", "HTTP".blue().bold(), r.method, r.url,);
-                    let status_color = if r.status < 300 {
-                        format!("{} {}", r.status, r.status_text)
-                            .green()
-                            .to_string()
-                    } else if r.status < 400 {
-                        format!("{} {}", r.status, r.status_text)
-                            .yellow()
-                            .to_string()
-                    } else {
-                        format!("{} {}", r.status, r.status_text).red().to_string()
-                    };
-                    out.push_str(&format!("  Status: {status_color}\n"));
-                    out.push_str(&format!("  Body: {} bytes\n", r.body_size));
-                    out.push_str(&format!(
-                        "  Timing: DNS={:.1}ms Connect={:.1}ms TTFB={:.1}ms Total={:.1}ms\n",
-                        r.timing.dns_ms, r.timing.connect_ms, r.timing.ttfb_ms, r.timing.total_ms,
-                    ));
-                    out
-                }
-            })
+            netscout_core::http::probe(&config).map(|r| format_output(&r, format))
         }
         Commands::Cert { host, port } => {
             let config = netscout_core::cert::CertConfig {
@@ -305,26 +252,7 @@ async fn main() -> Result<(), String> {
                 port,
                 ..Default::default()
             };
-            netscout_core::cert::inspect(&config).map(|r| {
-                if format == OutputFormat::Json {
-                    serde_json::to_string_pretty(&r).unwrap()
-                } else {
-                    let mut out = format!("{} {}:{}\n", "TLS CERT".green().bold(), r.host, r.port,);
-                    out.push_str(&format!("  TLS Version: {}\n", r.tls_version));
-                    out.push_str(&format!("  Cipher: {}\n", r.cipher_suite));
-                    out.push_str(&format!("  Connect: {:.1} ms\n", r.connection_time_ms));
-                    for (i, cert) in r.certificate_chain.iter().enumerate() {
-                        out.push_str(&format!("  Certificate #{i}:\n"));
-                        out.push_str(&format!("    Subject: {}\n", cert.subject));
-                        out.push_str(&format!("    Issuer: {}\n", cert.issuer));
-                        out.push_str(&format!("    Serial: {}\n", cert.serial));
-                    }
-                    if let Some(w) = &r.warning {
-                        out.push_str(&format!("  {w}\n"));
-                    }
-                    out
-                }
-            })
+            netscout_core::cert::inspect(&config).map(|r| format_output(&r, format))
         }
         Commands::Speed {
             url,
@@ -339,51 +267,14 @@ async fn main() -> Result<(), String> {
                 upload_only,
                 ..Default::default()
             };
-            netscout_core::speed::test_speed(&config).map(|r| {
-                if format == OutputFormat::Json {
-                    serde_json::to_string_pretty(&r).unwrap()
-                } else {
-                    let mut out = format!("{}\n", "SPEED TEST".cyan().bold());
-                    if let Some(dl) = r.download_mbps {
-                        out.push_str(&format!("  Download: {dl:.2} Mbps\n"));
-                    }
-                    if let Some(ul) = r.upload_mbps {
-                        out.push_str(&format!("  Upload: {ul:.2} Mbps\n"));
-                    }
-                    out
-                }
-            })
+            netscout_core::speed::test_speed(&config).map(|r| format_output(&r, format))
         }
         Commands::Whois { target } => {
             let config = netscout_core::whois::WhoisConfig {
                 target,
                 ..Default::default()
             };
-            netscout_core::whois::query(&config).map(|r| {
-                if format == OutputFormat::Json {
-                    serde_json::to_string_pretty(&r).unwrap()
-                } else {
-                    let mut out =
-                        format!("{} {} @{}\n", "WHOIS".yellow().bold(), r.target, r.server,);
-                    if let Some(reg) = &r.registrar {
-                        out.push_str(&format!("  Registrar: {reg}\n"));
-                    }
-                    if let Some(d) = &r.creation_date {
-                        out.push_str(&format!("  Created: {d}\n"));
-                    }
-                    if let Some(d) = &r.expiry_date {
-                        out.push_str(&format!("  Expires: {d}\n"));
-                    }
-                    if !r.nameservers.is_empty() {
-                        out.push_str("  Nameservers:\n");
-                        for ns in &r.nameservers {
-                            out.push_str(&format!("    {ns}\n"));
-                        }
-                    }
-                    out.push_str(&format!("  Query time: {:.1} ms\n", r.query_time_ms));
-                    out
-                }
-            })
+            netscout_core::whois::query(&config).map(|r| format_output(&r, format))
         }
         Commands::Netif { up_only } => netscout_core::netif::list_interfaces().map(|mut r| {
             if up_only {

@@ -201,6 +201,134 @@ impl HumanReadable for crate::scan::LanScanResult {
     }
 }
 
+impl HumanReadable for crate::trace::TraceResult {
+    fn to_human(&self) -> String {
+        let mut out = format!(
+            "{} {} ({})\n",
+            "TRACEROUTE".yellow().bold(),
+            self.target,
+            self.resolved_addr,
+        );
+        for hop in &self.hops {
+            if hop.timed_out {
+                out.push_str(&format!("  {:>2}  {}\n", hop.hop, "* * *".dimmed()));
+            } else {
+                let addr = hop.addr.as_deref().unwrap_or("???");
+                let name = hop
+                    .hostname
+                    .as_deref()
+                    .map(|h| format!(" ({h})"))
+                    .unwrap_or_default();
+                let rtt = hop.rtt_ms.map(|r| format!("{r:.2} ms")).unwrap_or_default();
+                out.push_str(&format!("  {:>2}  {addr}{name}  {rtt}\n", hop.hop));
+            }
+        }
+        if self.reached {
+            out.push_str(&format!("  {}\n", "Destination reached.".green()));
+        } else {
+            out.push_str(&format!("  {}\n", "Destination not reached.".red()));
+        }
+        out
+    }
+}
+
+impl HumanReadable for crate::http::HttpResult {
+    fn to_human(&self) -> String {
+        let mut out = format!("{} {} {}\n", "HTTP".blue().bold(), self.method, self.url);
+        let status_color = if self.status < 300 {
+            format!("{} {}", self.status, self.status_text)
+                .green()
+                .to_string()
+        } else if self.status < 400 {
+            format!("{} {}", self.status, self.status_text)
+                .yellow()
+                .to_string()
+        } else {
+            format!("{} {}", self.status, self.status_text)
+                .red()
+                .to_string()
+        };
+        out.push_str(&format!("  Status: {status_color}\n"));
+        out.push_str(&format!("  Body: {} bytes\n", self.body_size));
+        out.push_str(&format!(
+            "  Timing: DNS={:.1}ms Connect={:.1}ms TTFB={:.1}ms Total={:.1}ms\n",
+            self.timing.dns_ms, self.timing.connect_ms, self.timing.ttfb_ms, self.timing.total_ms,
+        ));
+        if !self.redirects.is_empty() {
+            out.push_str("  Redirects:\n");
+            for r in &self.redirects {
+                out.push_str(&format!("    {} → {}\n", r.status, r.url));
+            }
+        }
+        out
+    }
+}
+
+impl HumanReadable for crate::cert::CertResult {
+    fn to_human(&self) -> String {
+        let mut out = format!(
+            "{} {}:{}\n",
+            "TLS CERT".green().bold(),
+            self.host,
+            self.port
+        );
+        out.push_str(&format!("  TLS Version: {}\n", self.tls_version));
+        out.push_str(&format!("  Cipher: {}\n", self.cipher_suite));
+        out.push_str(&format!("  Connect: {:.1} ms\n", self.connection_time_ms));
+        for (i, cert) in self.certificate_chain.iter().enumerate() {
+            out.push_str(&format!("  Certificate #{i}:\n"));
+            out.push_str(&format!("    Subject: {}\n", cert.subject));
+            out.push_str(&format!("    Issuer: {}\n", cert.issuer));
+            out.push_str(&format!("    Serial: {}\n", cert.serial));
+        }
+        if let Some(w) = &self.warning {
+            out.push_str(&format!("  {}\n", w.yellow()));
+        }
+        out
+    }
+}
+
+impl HumanReadable for crate::speed::SpeedResult {
+    fn to_human(&self) -> String {
+        let mut out = format!("{}\n", "SPEED TEST".cyan().bold());
+        if let Some(dl) = self.download_mbps {
+            out.push_str(&format!("  Download: {:.2} Mbps\n", dl));
+        }
+        if let Some(ul) = self.upload_mbps {
+            out.push_str(&format!("  Upload: {:.2} Mbps\n", ul));
+        }
+        out
+    }
+}
+
+impl HumanReadable for crate::whois::WhoisResult {
+    fn to_human(&self) -> String {
+        let mut out = format!(
+            "{} {} @{}\n",
+            "WHOIS".yellow().bold(),
+            self.target,
+            self.server
+        );
+        if let Some(reg) = &self.registrar {
+            out.push_str(&format!("  Registrar: {reg}\n"));
+        }
+        if let Some(d) = &self.creation_date {
+            out.push_str(&format!("  Created: {d}\n"));
+        }
+        if let Some(d) = &self.expiry_date {
+            out.push_str(&format!("  Expires: {d}\n"));
+        }
+        if !self.nameservers.is_empty() {
+            out.push_str("  Nameservers:\n");
+            for ns in &self.nameservers {
+                out.push_str(&format!("    {ns}\n"));
+            }
+        }
+        out.push_str(&format!("  Query time: {:.1} ms\n", self.query_time_ms));
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
