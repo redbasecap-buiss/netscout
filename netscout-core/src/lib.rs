@@ -16,4 +16,5 @@ pub enum OutputFormat {
     Human,
     Json,
     Table,
+    Csv,
 }

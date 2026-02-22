@@ -23,6 +23,10 @@ struct Cli {
     #[arg(long, global = true)]
     table: bool,
 
+    /// Output as CSV (for scripting/pipelines)
+    #[arg(long, global = true)]
+    csv: bool,
+
     /// Disable colored output
     #[arg(long, global = true)]
     no_color: bool,
@@ -148,6 +152,8 @@ enum Commands {
 fn get_format(cli: &Cli) -> OutputFormat {
     if cli.json {
         OutputFormat::Json
+    } else if cli.csv {
+        OutputFormat::Csv
     } else if cli.table {
         OutputFormat::Table
     } else {

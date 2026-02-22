@@ -182,6 +182,34 @@ fn test_global_table_flag() {
 }
 
 #[test]
+fn test_global_csv_flag() {
+    let output = netscout_bin().args(["--csv", "netif"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // CSV output should have header row with commas
+    assert!(stdout.contains("name,state,type,mtu,addresses"));
+    // Should have at least one data row
+    assert!(stdout.lines().count() >= 2);
+}
+
+#[test]
+fn test_csv_netif_parseable() {
+    let output = netscout_bin().args(["--csv", "netif"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+    // Header
+    assert_eq!(lines[0], "name,state,type,mtu,addresses");
+    // Each data row should have at least 4 commas (5 fields)
+    for line in &lines[1..] {
+        assert!(
+            line.matches(',').count() >= 4,
+            "CSV row should have at least 5 fields: {line}"
+        );
+    }
+}
+
+#[test]
 fn test_ping_port_flag_help() {
     let output = netscout_bin().args(["ping", "--help"]).output().unwrap();
     assert!(output.status.success());

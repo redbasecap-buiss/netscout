@@ -210,6 +210,32 @@ fn count_v6_prefix(mask: &[u8; 16]) -> u8 {
 }
 
 impl HumanReadable for NetifResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("name,state,type,mtu,addresses\n");
+        for iface in &self.interfaces {
+            let state = if iface.is_up { "UP" } else { "DOWN" };
+            let kind = if iface.is_loopback { "lo" } else { "eth" };
+            let mtu = iface.mtu.map(|m| m.to_string()).unwrap_or_default();
+            let addrs: Vec<String> = iface
+                .addresses
+                .iter()
+                .map(|a| {
+                    let prefix = a.prefix_len.map(|p| format!("/{p}")).unwrap_or_default();
+                    format!("{}{}", a.ip, prefix)
+                })
+                .collect();
+            out.push_str(&format!(
+                "{},{},{},{},\"{}\"\n",
+                iface.name,
+                state,
+                kind,
+                mtu,
+                addrs.join(";")
+            ));
+        }
+        out
+    }
+
     fn to_table(&self) -> String {
         let mut out = format!("Interfaces: {} total, {} up\n\n", self.total, self.up_count,);
         out.push_str(&format!(

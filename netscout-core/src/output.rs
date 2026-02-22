@@ -2,13 +2,14 @@ use crate::OutputFormat;
 use colored::Colorize;
 use serde::Serialize;
 
-/// Format a value as JSON, table, or human-readable.
+/// Format a value as JSON, table, CSV, or human-readable.
 pub fn format_output<T: Serialize + HumanReadable>(value: &T, format: OutputFormat) -> String {
     match format {
         OutputFormat::Json => {
             serde_json::to_string_pretty(value).unwrap_or_else(|e| format!("JSON error: {e}"))
         }
         OutputFormat::Table => value.to_table(),
+        OutputFormat::Csv => value.to_csv(),
         OutputFormat::Human => value.to_human(),
     }
 }
@@ -18,6 +19,10 @@ pub trait HumanReadable {
     fn to_human(&self) -> String;
     fn to_table(&self) -> String {
         self.to_human()
+    }
+    fn to_csv(&self) -> String {
+        // Default: no CSV; subcommands override
+        String::from("CSV output not supported for this command\n")
     }
 }
 
@@ -75,6 +80,16 @@ pub fn pad_right(s: &str, width: usize) -> String {
 
 // Implement HumanReadable for core types
 impl HumanReadable for crate::ping::PingStats {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("seq,status,rtt_ms,addr\n");
+        for p in &self.probes {
+            let status = if p.success { "ok" } else { "timeout" };
+            let rtt = p.rtt_ms.map(|r| format!("{r:.2}")).unwrap_or_default();
+            out.push_str(&format!("{},{},{},{}\n", p.seq, status, rtt, p.addr));
+        }
+        out
+    }
+
     fn to_table(&self) -> String {
         let mut out = format!(
             "Ping: {} ({}) — {}/{} received ({:.1}% loss)\n\n",
@@ -144,6 +159,20 @@ impl HumanReadable for crate::ping::PingStats {
 }
 
 impl HumanReadable for crate::dns::DnsResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("type,name,ttl,value\n");
+        for r in &self.records {
+            // Escape values that might contain commas
+            let val = if r.value.contains(',') {
+                format!("\"{}\"", r.value)
+            } else {
+                r.value.clone()
+            };
+            out.push_str(&format!("{},{},{},{}\n", r.record_type, r.name, r.ttl, val));
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -194,6 +223,15 @@ impl HumanReadable for crate::dns::DnsResult {
 }
 
 impl HumanReadable for crate::port::ScanResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("port,proto,service\n");
+        for p in &self.ports {
+            let svc = p.service.as_deref().unwrap_or("unknown");
+            out.push_str(&format!("{},tcp,{}\n", p.port, svc));
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -234,6 +272,46 @@ impl HumanReadable for crate::port::ScanResult {
 }
 
 impl HumanReadable for crate::scan::LanScanResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("ip,hostname,open_ports,rtt_ms\n");
+        for h in &self.hosts {
+            let name = h.hostname.as_deref().unwrap_or("");
+            let ports: Vec<String> = h.open_ports.iter().map(|p| p.to_string()).collect();
+            out.push_str(&format!(
+                "{},{},\"{}\",{:.2}\n",
+                h.ip,
+                name,
+                ports.join(";"),
+                h.rtt_ms
+            ));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!(
+            "LAN Scan: {} — {} found / {} scanned\n\n",
+            self.subnet, self.hosts_found, self.total_scanned,
+        );
+        out.push_str(&format!(
+            "{:<16} {:<20} {:<20} {}\n",
+            "IP", "HOSTNAME", "OPEN PORTS", "RTT"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(65)));
+        for h in &self.hosts {
+            let name = h.hostname.as_deref().unwrap_or("-");
+            let ports: Vec<String> = h.open_ports.iter().map(|p| p.to_string()).collect();
+            out.push_str(&format!(
+                "{:<16} {:<20} {:<20} {}\n",
+                h.ip,
+                name,
+                ports.join(","),
+                format_ms(h.rtt_ms),
+            ));
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -260,6 +338,51 @@ impl HumanReadable for crate::scan::LanScanResult {
 }
 
 impl HumanReadable for crate::trace::TraceResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("hop,addr,hostname,rtt_ms,timed_out\n");
+        for hop in &self.hops {
+            let addr = hop.addr.as_deref().unwrap_or("");
+            let name = hop.hostname.as_deref().unwrap_or("");
+            let rtt = hop.rtt_ms.map(|r| format!("{r:.2}")).unwrap_or_default();
+            out.push_str(&format!(
+                "{},{},{},{},{}\n",
+                hop.hop, addr, name, rtt, hop.timed_out
+            ));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!("Traceroute: {} ({})\n\n", self.target, self.resolved_addr);
+        out.push_str(&format!(
+            "{:<5} {:<16} {:<30} {}\n",
+            "HOP", "ADDRESS", "HOSTNAME", "RTT"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(60)));
+        for hop in &self.hops {
+            if hop.timed_out {
+                out.push_str(&format!("{:<5} {:<16} {:<30} {}\n", hop.hop, "*", "*", "*"));
+            } else {
+                let addr = hop.addr.as_deref().unwrap_or("???");
+                let name = hop.hostname.as_deref().unwrap_or("-");
+                let rtt = hop
+                    .rtt_ms
+                    .map(|r| format!("{r:.2} ms"))
+                    .unwrap_or_else(|| "-".into());
+                out.push_str(&format!(
+                    "{:<5} {:<16} {:<30} {}\n",
+                    hop.hop, addr, name, rtt
+                ));
+            }
+        }
+        if self.reached {
+            out.push_str("\nDestination reached.\n");
+        } else {
+            out.push_str("\nDestination not reached.\n");
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = format!(
             "{} {} ({})\n",
@@ -291,6 +414,59 @@ impl HumanReadable for crate::trace::TraceResult {
 }
 
 impl HumanReadable for crate::http::HttpResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("field,value\n");
+        out.push_str(&format!("url,{}\n", self.url));
+        out.push_str(&format!("method,{}\n", self.method));
+        out.push_str(&format!("status,{}\n", self.status));
+        out.push_str(&format!("body_size,{}\n", self.body_size));
+        out.push_str(&format!("dns_ms,{:.1}\n", self.timing.dns_ms));
+        out.push_str(&format!("connect_ms,{:.1}\n", self.timing.connect_ms));
+        out.push_str(&format!("ttfb_ms,{:.1}\n", self.timing.ttfb_ms));
+        out.push_str(&format!("total_ms,{:.1}\n", self.timing.total_ms));
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!(
+            "HTTP {} {} — {} {}\n\n",
+            self.method, self.url, self.status, self.status_text
+        );
+        out.push_str(&format!("{:<15} {} bytes\n", "Body Size", self.body_size));
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "DNS",
+            format_ms(self.timing.dns_ms)
+        ));
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "Connect",
+            format_ms(self.timing.connect_ms)
+        ));
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "TTFB",
+            format_ms(self.timing.ttfb_ms)
+        ));
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "Transfer",
+            format_ms(self.timing.transfer_ms)
+        ));
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "Total",
+            format_ms(self.timing.total_ms)
+        ));
+        if !self.redirects.is_empty() {
+            out.push_str("\nRedirects:\n");
+            for r in &self.redirects {
+                out.push_str(&format!("  {} → {}\n", r.status, r.url));
+            }
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = format!("{} {} {}\n", "HTTP".blue().bold(), self.method, self.url);
         let status_color = if self.status < 300 {
@@ -323,6 +499,60 @@ impl HumanReadable for crate::http::HttpResult {
 }
 
 impl HumanReadable for crate::cert::CertResult {
+    fn to_csv(&self) -> String {
+        let mut out =
+            String::from("index,subject,issuer,not_before,not_after,days_until_expiry,serial\n");
+        for (i, cert) in self.certificate_chain.iter().enumerate() {
+            // Quote fields that may contain commas
+            out.push_str(&format!(
+                "{},\"{}\",\"{}\",{},{},{},{}\n",
+                i,
+                cert.subject,
+                cert.issuer,
+                cert.not_before,
+                cert.not_after,
+                cert.days_until_expiry,
+                cert.serial,
+            ));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!("TLS Certificate: {}:{}\n", self.host, self.port);
+        out.push_str(&format!(
+            "TLS: {}  Cipher: {}  Connect: {}\n\n",
+            self.tls_version,
+            self.cipher_suite,
+            format_ms(self.connection_time_ms)
+        ));
+        out.push_str(&format!(
+            "{:<4} {:<35} {:<35} {:<12} {}\n",
+            "#", "SUBJECT", "ISSUER", "EXPIRES", "DAYS LEFT"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(95)));
+        for (i, cert) in self.certificate_chain.iter().enumerate() {
+            let subj = if cert.subject.len() > 33 {
+                &cert.subject[..33]
+            } else {
+                &cert.subject
+            };
+            let iss = if cert.issuer.len() > 33 {
+                &cert.issuer[..33]
+            } else {
+                &cert.issuer
+            };
+            out.push_str(&format!(
+                "{:<4} {:<35} {:<35} {:<12} {}\n",
+                i, subj, iss, cert.not_after, cert.days_until_expiry,
+            ));
+        }
+        if let Some(w) = &self.warning {
+            out.push_str(&format!("\nWarning: {w}\n"));
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = format!(
             "{} {}:{}\n",
@@ -355,11 +585,135 @@ impl HumanReadable for crate::speed::SpeedResult {
         if let Some(ul) = self.upload_mbps {
             out.push_str(&format!("  Upload: {:.2} Mbps\n", ul));
         }
+        if let Some(bytes) = self.download_bytes {
+            out.push_str(&format!("  Downloaded: {}\n", format_bytes(bytes)));
+        }
+        if let Some(ms) = self.download_time_ms {
+            out.push_str(&format!("  Duration: {}\n", format_ms(ms)));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = String::from("Speed Test Results\n\n");
+        out.push_str(&format!(
+            "{:<15} {:<15} {:<15} {}\n",
+            "DIRECTION", "SPEED", "BYTES", "TIME"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(55)));
+        if let Some(dl) = self.download_mbps {
+            let bytes = self
+                .download_bytes
+                .map(format_bytes)
+                .unwrap_or_else(|| "-".into());
+            let time = self
+                .download_time_ms
+                .map(format_ms)
+                .unwrap_or_else(|| "-".into());
+            out.push_str(&format!(
+                "{:<15} {:<15} {:<15} {}\n",
+                "Download",
+                format!("{:.2} Mbps", dl),
+                bytes,
+                time
+            ));
+        }
+        if let Some(ul) = self.upload_mbps {
+            let bytes = self
+                .upload_bytes
+                .map(format_bytes)
+                .unwrap_or_else(|| "-".into());
+            let time = self
+                .upload_time_ms
+                .map(format_ms)
+                .unwrap_or_else(|| "-".into());
+            out.push_str(&format!(
+                "{:<15} {:<15} {:<15} {}\n",
+                "Upload",
+                format!("{:.2} Mbps", ul),
+                bytes,
+                time
+            ));
+        }
+        out
+    }
+
+    fn to_csv(&self) -> String {
+        let mut out = String::from("direction,speed_mbps,bytes,time_ms\n");
+        if let Some(dl) = self.download_mbps {
+            out.push_str(&format!(
+                "download,{:.2},{},{:.1}\n",
+                dl,
+                self.download_bytes.unwrap_or(0),
+                self.download_time_ms.unwrap_or(0.0),
+            ));
+        }
+        if let Some(ul) = self.upload_mbps {
+            out.push_str(&format!(
+                "upload,{:.2},{},{:.1}\n",
+                ul,
+                self.upload_bytes.unwrap_or(0),
+                self.upload_time_ms.unwrap_or(0.0),
+            ));
+        }
         out
     }
 }
 
 impl HumanReadable for crate::whois::WhoisResult {
+    fn to_csv(&self) -> String {
+        let mut out = String::from("field,value\n");
+        out.push_str(&format!("target,{}\n", self.target));
+        out.push_str(&format!("server,{}\n", self.server));
+        if let Some(r) = &self.registrar {
+            out.push_str(&format!("registrar,{r}\n"));
+        }
+        if let Some(d) = &self.creation_date {
+            out.push_str(&format!("created,{d}\n"));
+        }
+        if let Some(d) = &self.expiry_date {
+            out.push_str(&format!("expires,{d}\n"));
+        }
+        if let Some(d) = &self.updated_date {
+            out.push_str(&format!("updated,{d}\n"));
+        }
+        for ns in &self.nameservers {
+            out.push_str(&format!("nameserver,{ns}\n"));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!("WHOIS: {} @{}\n\n", self.target, self.server);
+        out.push_str(&format!("{:<15} {}\n", "FIELD", "VALUE"));
+        out.push_str(&format!("{}\n", "-".repeat(50)));
+        if let Some(r) = &self.registrar {
+            out.push_str(&format!("{:<15} {}\n", "Registrar", r));
+        }
+        if let Some(d) = &self.creation_date {
+            out.push_str(&format!("{:<15} {}\n", "Created", d));
+        }
+        if let Some(d) = &self.expiry_date {
+            out.push_str(&format!("{:<15} {}\n", "Expires", d));
+        }
+        if let Some(d) = &self.updated_date {
+            out.push_str(&format!("{:<15} {}\n", "Updated", d));
+        }
+        if !self.nameservers.is_empty() {
+            out.push_str(&format!(
+                "{:<15} {}\n",
+                "Nameservers",
+                self.nameservers.join(", ")
+            ));
+        }
+        out.push_str(&format!(
+            "{:<15} {}\n",
+            "Query Time",
+            format_ms(self.query_time_ms)
+        ));
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = format!(
             "{} {} @{}\n",
