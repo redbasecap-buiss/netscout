@@ -19,6 +19,10 @@ struct Cli {
     #[arg(long, global = true)]
     json: bool,
 
+    /// Output as a table
+    #[arg(long, global = true)]
+    table: bool,
+
     /// Disable colored output
     #[arg(long, global = true)]
     no_color: bool,
@@ -43,6 +47,9 @@ enum Commands {
         /// Timeout per ping in milliseconds
         #[arg(short, long, default_value = "2000")]
         timeout: u64,
+        /// TCP port to ping (default: 80)
+        #[arg(short, long, default_value = "80")]
+        port: u16,
     },
     /// Query DNS records
     Dns {
@@ -141,6 +148,8 @@ enum Commands {
 fn get_format(cli: &Cli) -> OutputFormat {
     if cli.json {
         OutputFormat::Json
+    } else if cli.table {
+        OutputFormat::Table
     } else {
         OutputFormat::Human
     }
@@ -162,13 +171,14 @@ async fn main() -> Result<(), String> {
             count,
             interval,
             timeout,
+            port,
         } => {
             let config = netscout_core::ping::PingConfig {
                 target,
                 count,
                 interval: Duration::from_millis(interval),
                 timeout: Duration::from_millis(timeout),
-                ..Default::default()
+                port,
             };
             netscout_core::ping::ping(&config)
                 .await

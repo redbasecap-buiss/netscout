@@ -75,6 +75,31 @@ pub fn pad_right(s: &str, width: usize) -> String {
 
 // Implement HumanReadable for core types
 impl HumanReadable for crate::ping::PingStats {
+    fn to_table(&self) -> String {
+        let mut out = format!(
+            "Ping: {} ({}) — {}/{} received ({:.1}% loss)\n\n",
+            self.target, self.resolved_addr, self.received, self.sent, self.loss_percent,
+        );
+        out.push_str(&format!("{:<6} {:<10} {:<15}\n", "SEQ", "STATUS", "RTT"));
+        out.push_str(&format!("{}\n", "-".repeat(31)));
+        for p in &self.probes {
+            let status = if p.success { "ok" } else { "timeout" };
+            let rtt = p.rtt_ms.map(format_ms).unwrap_or_else(|| "-".to_string());
+            out.push_str(&format!("{:<6} {:<10} {:<15}\n", p.seq, status, rtt));
+        }
+        if let (Some(min), Some(avg), Some(max)) = (self.min_ms, self.avg_ms, self.max_ms) {
+            out.push_str(&format!(
+                "\nmin={:.2} ms  avg={:.2} ms  max={:.2} ms",
+                min, avg, max,
+            ));
+            if let Some(jitter) = self.jitter_ms {
+                out.push_str(&format!("  jitter={:.2} ms", jitter));
+            }
+            out.push('\n');
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         let mut out = String::new();
         out.push_str(&format!(
@@ -147,6 +172,25 @@ impl HumanReadable for crate::dns::DnsResult {
         }
         out
     }
+
+    fn to_table(&self) -> String {
+        let mut out = format!(
+            "DNS: {} @{} — {} ({})\n\n",
+            self.domain, self.resolver, self.record_type, self.response_code,
+        );
+        out.push_str(&format!(
+            "{:<8} {:<30} {:<8} {}\n",
+            "TYPE", "NAME", "TTL", "VALUE"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(70)));
+        for r in &self.records {
+            out.push_str(&format!(
+                "{:<8} {:<30} {:<8} {}\n",
+                r.record_type, r.name, r.ttl, r.value,
+            ));
+        }
+        out
+    }
 }
 
 impl HumanReadable for crate::port::ScanResult {
@@ -170,6 +214,20 @@ impl HumanReadable for crate::port::ScanResult {
                 "tcp",
                 svc,
             ));
+        }
+        out
+    }
+
+    fn to_table(&self) -> String {
+        let mut out = format!(
+            "Port Scan: {} ({}) — {} open, {} closed\n\n",
+            self.target, self.resolved_addr, self.open_count, self.closed_count,
+        );
+        out.push_str(&format!("{:<8} {:<8} {:<20}\n", "PORT", "PROTO", "SERVICE"));
+        out.push_str(&format!("{}\n", "-".repeat(36)));
+        for p in &self.ports {
+            let svc = p.service.as_deref().unwrap_or("unknown");
+            out.push_str(&format!("{:<8} {:<8} {:<20}\n", p.port, "tcp", svc));
         }
         out
     }

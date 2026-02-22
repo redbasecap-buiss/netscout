@@ -169,3 +169,22 @@ fn test_dns_missing_domain() {
     let output = netscout_bin().args(["dns"]).output().unwrap();
     assert!(!output.status.success());
 }
+
+#[test]
+fn test_global_table_flag() {
+    let output = netscout_bin().args(["--table", "netif"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Table output should have column headers
+    assert!(stdout.contains("NAME"));
+    assert!(stdout.contains("STATE"));
+    assert!(stdout.contains("MTU"));
+}
+
+#[test]
+fn test_ping_port_flag_help() {
+    let output = netscout_bin().args(["ping", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("--port"));
+}

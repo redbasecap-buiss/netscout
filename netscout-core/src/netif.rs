@@ -210,6 +210,41 @@ fn count_v6_prefix(mask: &[u8; 16]) -> u8 {
 }
 
 impl HumanReadable for NetifResult {
+    fn to_table(&self) -> String {
+        let mut out = format!("Interfaces: {} total, {} up\n\n", self.total, self.up_count,);
+        out.push_str(&format!(
+            "{:<12} {:<6} {:<8} {:<6} {}\n",
+            "NAME", "STATE", "TYPE", "MTU", "ADDRESSES"
+        ));
+        out.push_str(&format!("{}\n", "-".repeat(65)));
+        for iface in &self.interfaces {
+            let state = if iface.is_up { "UP" } else { "DOWN" };
+            let kind = if iface.is_loopback { "lo" } else { "eth" };
+            let mtu = iface
+                .mtu
+                .map(|m| m.to_string())
+                .unwrap_or_else(|| "-".into());
+            let addrs: Vec<String> = iface
+                .addresses
+                .iter()
+                .map(|a| {
+                    let prefix = a.prefix_len.map(|p| format!("/{p}")).unwrap_or_default();
+                    format!("{}{}", a.ip, prefix)
+                })
+                .collect();
+            let addr_str = if addrs.is_empty() {
+                "-".to_string()
+            } else {
+                addrs.join(", ")
+            };
+            out.push_str(&format!(
+                "{:<12} {:<6} {:<8} {:<6} {}\n",
+                iface.name, state, kind, mtu, addr_str,
+            ));
+        }
+        out
+    }
+
     fn to_human(&self) -> String {
         use crate::output::status_icon;
 
