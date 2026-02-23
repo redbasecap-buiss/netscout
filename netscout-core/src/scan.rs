@@ -168,6 +168,22 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_subnet_25() {
+        let addrs = parse_subnet("192.168.1.0/25").unwrap();
+        assert_eq!(addrs.len(), 126); // /25 = 128 addresses - 2 (network + broadcast)
+        assert_eq!(addrs[0], Ipv4Addr::new(192, 168, 1, 1));
+        assert_eq!(addrs[125], Ipv4Addr::new(192, 168, 1, 126));
+    }
+
+    #[test]
+    fn test_parse_subnet_16() {
+        let addrs = parse_subnet("10.0.0.0/16").unwrap();
+        assert_eq!(addrs.len(), 65534); // 65536 - 2
+        assert_eq!(addrs[0], Ipv4Addr::new(10, 0, 0, 1));
+        assert_eq!(addrs[65533], Ipv4Addr::new(10, 0, 255, 254));
+    }
+
+    #[test]
     fn test_parse_subnet_30() {
         let addrs = parse_subnet("10.0.0.0/30").unwrap();
         assert_eq!(addrs.len(), 2);
@@ -176,9 +192,26 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_subnet_31() {
+        let addrs = parse_subnet("192.168.1.0/31").unwrap();
+        assert_eq!(addrs.len(), 2); // Point-to-point link
+        assert_eq!(addrs[0], Ipv4Addr::new(192, 168, 1, 0));
+        assert_eq!(addrs[1], Ipv4Addr::new(192, 168, 1, 1));
+    }
+
+    #[test]
     fn test_parse_subnet_32() {
         let addrs = parse_subnet("10.0.0.1/32").unwrap();
         assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0], Ipv4Addr::new(10, 0, 0, 1));
+    }
+
+    #[test]
+    fn test_parse_subnet_different_networks() {
+        let addrs = parse_subnet("172.16.0.0/28").unwrap();
+        assert_eq!(addrs.len(), 14); // 16 - 2
+        assert_eq!(addrs[0], Ipv4Addr::new(172, 16, 0, 1));
+        assert_eq!(addrs[13], Ipv4Addr::new(172, 16, 0, 14));
     }
 
     #[test]
@@ -186,6 +219,17 @@ mod tests {
         assert!(parse_subnet("192.168.1.0").is_err());
         assert!(parse_subnet("192.168.1.0/33").is_err());
         assert!(parse_subnet("192.168.1.0/8").is_err()); // Too large
+        assert!(parse_subnet("invalid.ip/24").is_err());
+        assert!(parse_subnet("192.168.1.0/abc").is_err());
+        assert!(parse_subnet("").is_err());
+        assert!(parse_subnet("/24").is_err());
+    }
+
+    #[test]
+    fn test_parse_subnet_edge_cases() {
+        assert!(parse_subnet("192.168.1.0/-1").is_err());
+        assert!(parse_subnet("192.168.1.0/99").is_err());
+        assert!(parse_subnet("256.256.256.256/24").is_err());
     }
 
     #[test]
@@ -199,5 +243,120 @@ mod tests {
         let json = serde_json::to_string(&host).unwrap();
         assert!(json.contains("192.168.1.1"));
         assert!(json.contains("router.local"));
+        assert!(json.contains("22"));
+        assert!(json.contains("80"));
+        assert!(json.contains("1.5"));
+    }
+
+    #[test]
+    fn test_host_result_no_hostname() {
+        let host = HostResult {
+            ip: "10.0.0.5".into(),
+            hostname: None,
+            open_ports: vec![443, 8080],
+            rtt_ms: 25.3,
+        };
+        assert_eq!(host.ip, "10.0.0.5");
+        assert!(host.hostname.is_none());
+        assert_eq!(host.open_ports, vec![443, 8080]);
+    }
+
+    #[test]
+    fn test_host_result_no_open_ports() {
+        let host = HostResult {
+            ip: "192.168.1.100".into(),
+            hostname: Some("device.local".into()),
+            open_ports: vec![],
+            rtt_ms: 0.5,
+        };
+        assert!(host.open_ports.is_empty());
+        assert_eq!(host.rtt_ms, 0.5);
+    }
+
+    #[test]
+    fn test_lan_scan_config_default() {
+        let config = LanScanConfig::default();
+        assert_eq!(config.subnet, "192.168.1.0/24");
+        assert_eq!(config.ports, vec![22, 80, 443, 8080]);
+        assert_eq!(config.timeout, Duration::from_millis(500));
+        assert_eq!(config.parallel, 256);
+    }
+
+    #[test]
+    fn test_lan_scan_config_custom() {
+        let config = LanScanConfig {
+            subnet: "10.0.0.0/24".to_string(),
+            ports: vec![22, 443],
+            timeout: Duration::from_millis(1000),
+            parallel: 100,
+        };
+        assert_eq!(config.subnet, "10.0.0.0/24");
+        assert_eq!(config.ports, vec![22, 443]);
+        assert_eq!(config.timeout, Duration::from_millis(1000));
+        assert_eq!(config.parallel, 100);
+    }
+
+    #[test]
+    fn test_lan_scan_result_serialization() {
+        let result = LanScanResult {
+            subnet: "192.168.1.0/24".to_string(),
+            hosts: vec![],
+            total_scanned: 254,
+            hosts_found: 0,
+            scan_time_ms: 5000.0,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("192.168.1.0/24"));
+        assert!(json.contains("254"));
+        assert!(json.contains("5000"));
+    }
+
+    #[test]
+    fn test_lan_scan_result_with_hosts() {
+        let hosts = vec![
+            HostResult {
+                ip: "192.168.1.1".into(),
+                hostname: Some("gateway".into()),
+                open_ports: vec![22, 80],
+                rtt_ms: 1.0,
+            },
+            HostResult {
+                ip: "192.168.1.10".into(),
+                hostname: None,
+                open_ports: vec![443],
+                rtt_ms: 5.5,
+            },
+        ];
+        let result = LanScanResult {
+            subnet: "192.168.1.0/24".to_string(),
+            hosts,
+            total_scanned: 254,
+            hosts_found: 2,
+            scan_time_ms: 3500.0,
+        };
+        
+        assert_eq!(result.hosts.len(), 2);
+        assert_eq!(result.hosts_found, 2);
+        assert_eq!(result.hosts[0].ip, "192.168.1.1");
+        assert_eq!(result.hosts[1].open_ports, vec![443]);
+    }
+
+    #[test]
+    fn test_subnet_calculation_edge_cases() {
+        // Test very small subnets
+        let addrs = parse_subnet("192.168.1.252/30").unwrap();
+        assert_eq!(addrs.len(), 2);
+        assert_eq!(addrs[0], Ipv4Addr::new(192, 168, 1, 253));
+        assert_eq!(addrs[1], Ipv4Addr::new(192, 168, 1, 254));
+    }
+
+    #[test]
+    fn test_subnet_network_calculation() {
+        // Test that network and broadcast addresses are correctly excluded
+        let addrs = parse_subnet("10.1.2.0/29").unwrap();
+        assert_eq!(addrs.len(), 6); // 8 addresses - network - broadcast
+        assert_eq!(addrs[0], Ipv4Addr::new(10, 1, 2, 1));
+        assert_eq!(addrs[5], Ipv4Addr::new(10, 1, 2, 6));
+        // Should not include 10.1.2.0 (network) or 10.1.2.7 (broadcast)
     }
 }

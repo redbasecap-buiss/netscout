@@ -753,6 +753,20 @@ mod tests {
     }
 
     #[test]
+    fn test_format_ms_edge_cases() {
+        assert_eq!(format_ms(0.1), "100.00 µs");
+        assert_eq!(format_ms(1.0), "1.00 ms");
+        assert_eq!(format_ms(999.99), "999.99 ms");
+        assert_eq!(format_ms(1000.0), "1.00 s");
+        assert_eq!(format_ms(5432.1), "5.43 s");
+    }
+
+    #[test]
+    fn test_format_ms_zero() {
+        assert_eq!(format_ms(0.0), "0.00 µs");
+    }
+
+    #[test]
     fn test_format_bytes() {
         assert_eq!(format_bytes(500), "500 B");
         assert!(format_bytes(2048).contains("KB"));
@@ -760,9 +774,35 @@ mod tests {
     }
 
     #[test]
+    fn test_format_bytes_edge_cases() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1), "1 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.0 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1.0 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GB");
+    }
+
+    #[test]
+    fn test_format_bytes_large() {
+        assert_eq!(format_bytes(2_147_483_648), "2.00 GB"); // 2 GB
+        assert_eq!(format_bytes(5_368_709_120), "5.00 GB"); // 5 GB
+        assert!(format_bytes(u64::MAX).contains("GB"));
+    }
+
+    #[test]
     fn test_pad_right() {
         assert_eq!(pad_right("hi", 5), "hi   ");
         assert_eq!(pad_right("hello", 3), "hello");
+    }
+
+    #[test]
+    fn test_pad_right_edge_cases() {
+        assert_eq!(pad_right("", 3), "   ");
+        assert_eq!(pad_right("test", 4), "test");
+        assert_eq!(pad_right("longer", 2), "longer"); // No truncation
+        assert_eq!(pad_right("exact", 5), "exact");
     }
 
     #[test]
@@ -776,5 +816,149 @@ mod tests {
         let result = kv("Key", "Value");
         assert!(result.contains("Key"));
         assert!(result.contains("Value"));
+        assert!(result.contains(":"));
+    }
+
+    #[test]
+    fn test_kv_format_empty() {
+        let result = kv("", "");
+        assert!(result.contains(":"));
+    }
+
+    #[test]
+    fn test_kv_format_special_chars() {
+        let result = kv("Special: Key", "Value with spaces");
+        assert!(result.contains("Special: Key"));
+        assert!(result.contains("Value with spaces"));
+    }
+
+    #[test]
+    fn test_section_header() {
+        let header = section_header("Test Section");
+        assert!(header.contains("Test Section"));
+        assert!(header.starts_with('\n')); // Should start with newline
+    }
+
+    #[test]
+    fn test_section_header_empty() {
+        let header = section_header("");
+        assert!(header.starts_with('\n'));
+    }
+
+    #[test]
+    fn test_format_output_json() {
+        use crate::dns::{DnsRecord, DnsResult};
+        
+        let record = DnsRecord {
+            name: "example.com".to_string(),
+            record_type: "A".to_string(),
+            ttl: 300,
+            value: "93.184.216.34".to_string(),
+        };
+        
+        let result = DnsResult {
+            domain: "example.com".to_string(),
+            resolver: "8.8.8.8".to_string(),
+            record_type: "A".to_string(),
+            records: vec![record],
+            query_time_ms: 25.0,
+            response_code: "NOERROR".to_string(),
+            truncated: false,
+            recursion_available: true,
+            authenticated_data: false,
+        };
+        
+        let output = format_output(&result, OutputFormat::Json);
+        assert!(output.contains("example.com"));
+        assert!(output.contains("93.184.216.34"));
+        assert!(output.contains("NOERROR"));
+    }
+
+    #[test]
+    fn test_format_output_human() {
+        use crate::ping::{PingProbe, PingStats};
+        
+        let stats = PingStats {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            probes: vec![
+                PingProbe {
+                    seq: 0,
+                    success: true,
+                    rtt_ms: Some(25.0),
+                    addr: "93.184.216.34".to_string(),
+                }
+            ],
+            sent: 1,
+            received: 1,
+            lost: 0,
+            loss_percent: 0.0,
+            min_ms: Some(25.0),
+            avg_ms: Some(25.0),
+            max_ms: Some(25.0),
+            stddev_ms: Some(0.0),
+            jitter_ms: None,
+        };
+        
+        let output = format_output(&stats, OutputFormat::Human);
+        assert!(output.contains("PING"));
+        assert!(output.contains("example.com"));
+        assert!(output.contains("✓"));
+    }
+
+    #[test]
+    fn test_format_output_table() {
+        use crate::port::{PortResult, ScanResult};
+        
+        let result = ScanResult {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            ports: vec![
+                PortResult {
+                    port: 80,
+                    open: true,
+                    service: Some("http".to_string()),
+                    rtt_ms: Some(10.0),
+                }
+            ],
+            open_count: 1,
+            closed_count: 0,
+            scan_time_ms: 100.0,
+        };
+        
+        let output = format_output(&result, OutputFormat::Table);
+        assert!(output.contains("PORT"));
+        assert!(output.contains("PROTO"));
+        assert!(output.contains("SERVICE"));
+        assert!(output.contains("80"));
+        assert!(output.contains("http"));
+    }
+
+    #[test]
+    fn test_format_output_csv() {
+        use crate::dns::{DnsRecord, DnsResult};
+        
+        let result = DnsResult {
+            domain: "example.com".to_string(),
+            resolver: "8.8.8.8".to_string(),
+            record_type: "A".to_string(),
+            records: vec![
+                DnsRecord {
+                    name: "example.com".to_string(),
+                    record_type: "A".to_string(),
+                    ttl: 300,
+                    value: "93.184.216.34".to_string(),
+                }
+            ],
+            query_time_ms: 25.0,
+            response_code: "NOERROR".to_string(),
+            truncated: false,
+            recursion_available: true,
+            authenticated_data: false,
+        };
+        
+        let output = format_output(&result, OutputFormat::Csv);
+        assert!(output.contains("type,name,ttl,value"));
+        assert!(output.contains("A,example.com,300,93.184.216.34"));
     }
 }

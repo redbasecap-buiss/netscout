@@ -145,6 +145,22 @@ mod tests {
         assert_eq!(cfg.count, 4);
         assert_eq!(cfg.port, 80);
         assert_eq!(cfg.timeout, Duration::from_secs(2));
+        assert_eq!(cfg.interval, Duration::from_secs(1));
+        assert_eq!(cfg.target, "");
+    }
+
+    #[test]
+    fn test_ping_config_custom() {
+        let cfg = PingConfig {
+            target: "example.com".to_string(),
+            count: 10,
+            interval: Duration::from_millis(500),
+            timeout: Duration::from_secs(5),
+            port: 443,
+        };
+        assert_eq!(cfg.target, "example.com");
+        assert_eq!(cfg.count, 10);
+        assert_eq!(cfg.port, 443);
     }
 
     #[test]
@@ -155,8 +171,33 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_ipv6_localhost() {
+        let addr = resolve("::1", 80);
+        if addr.is_ok() {
+            assert_eq!(addr.unwrap().ip().to_string(), "::1");
+        }
+        // IPv6 might not be available on all systems, so don't assert success
+    }
+
+    #[test]
+    fn test_resolve_with_port() {
+        let addr = resolve("127.0.0.1", 8080);
+        assert!(addr.is_ok());
+        let socket_addr = addr.unwrap();
+        assert_eq!(socket_addr.ip().to_string(), "127.0.0.1");
+        assert_eq!(socket_addr.port(), 8080);
+    }
+
+    #[test]
     fn test_resolve_bad_host() {
         let addr = resolve("this.host.definitely.does.not.exist.invalid", 80);
+        assert!(addr.is_err());
+        assert!(addr.unwrap_err().contains("DNS resolution failed"));
+    }
+
+    #[test]
+    fn test_resolve_empty_host() {
+        let addr = resolve("", 80);
         assert!(addr.is_err());
     }
 
@@ -168,6 +209,20 @@ mod tests {
         // On most systems this will be refused quickly (success=false) or possibly connect
         // Either way, the function should not panic
         let _ = success;
+    }
+
+    #[tokio::test]
+    async fn test_tcp_ping_timeout() {
+        // Use a non-routable IP that should timeout
+        let addr: SocketAddr = "192.0.2.1:80".parse().unwrap();
+        let start = std::time::Instant::now();
+        let (success, rtt) = tcp_ping(addr, Duration::from_millis(50)).await;
+        let elapsed = start.elapsed();
+        
+        assert!(!success);
+        assert!(rtt.is_none());
+        // Should timeout quickly
+        assert!(elapsed < Duration::from_millis(200));
     }
 
     #[test]
@@ -201,5 +256,116 @@ mod tests {
         let rtts: Vec<f64> = probes.iter().filter_map(|p| p.rtt_ms).collect();
         let avg = rtts.iter().sum::<f64>() / rtts.len() as f64;
         assert!((avg - 20.0).abs() < f64::EPSILON);
+        
+        let min = rtts.iter().cloned().reduce(f64::min).unwrap();
+        let max = rtts.iter().cloned().reduce(f64::max).unwrap();
+        assert_eq!(min, 10.0);
+        assert_eq!(max, 30.0);
+    }
+
+    #[test]
+    fn test_ping_probe_serialization() {
+        let probe = PingProbe {
+            seq: 1,
+            success: true,
+            rtt_ms: Some(15.5),
+            addr: "8.8.8.8".to_string(),
+        };
+        let json = serde_json::to_string(&probe).unwrap();
+        assert!(json.contains("8.8.8.8"));
+        assert!(json.contains("15.5"));
+        assert!(json.contains("true"));
+    }
+
+    #[test]
+    fn test_ping_probe_failed() {
+        let probe = PingProbe {
+            seq: 2,
+            success: false,
+            rtt_ms: None,
+            addr: "192.0.2.1".to_string(),
+        };
+        assert!(!probe.success);
+        assert!(probe.rtt_ms.is_none());
+    }
+
+    #[test]
+    fn test_ping_stats_serialization() {
+        let stats = PingStats {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            probes: vec![],
+            sent: 4,
+            received: 3,
+            lost: 1,
+            loss_percent: 25.0,
+            min_ms: Some(10.0),
+            avg_ms: Some(20.0),
+            max_ms: Some(30.0),
+            stddev_ms: Some(5.0),
+            jitter_ms: Some(2.5),
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        assert!(json.contains("example.com"));
+        assert!(json.contains("25.0"));
+        assert!(json.contains("93.184.216.34"));
+    }
+
+    #[test]
+    fn test_ping_stats_all_failed() {
+        let stats = PingStats {
+            target: "unreachable.invalid".to_string(),
+            resolved_addr: "192.0.2.1".to_string(),
+            probes: vec![],
+            sent: 3,
+            received: 0,
+            lost: 3,
+            loss_percent: 100.0,
+            min_ms: None,
+            avg_ms: None,
+            max_ms: None,
+            stddev_ms: None,
+            jitter_ms: None,
+        };
+        assert_eq!(stats.loss_percent, 100.0);
+        assert!(stats.min_ms.is_none());
+        assert!(stats.avg_ms.is_none());
+    }
+
+    #[test]
+    fn test_jitter_calculation() {
+        // Test jitter calculation with multiple RTT values
+        let rtts = vec![10.0_f64, 15.0, 12.0, 18.0];
+        let diffs: Vec<f64> = rtts.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
+        let jitter = diffs.iter().sum::<f64>() / diffs.len() as f64;
+        
+        // Expected: |15-10| + |12-15| + |18-12| = 5 + 3 + 6 = 14, avg = 14/3 = 4.67
+        let expected = 14.0 / 3.0;
+        assert!((jitter - expected).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_variance_calculation() {
+        let rtts = vec![10.0, 20.0, 30.0];
+        let avg = rtts.iter().sum::<f64>() / rtts.len() as f64; // 20.0
+        let variance = rtts.iter().map(|r| (r - avg).powi(2)).sum::<f64>() / rtts.len() as f64;
+        let stddev = variance.sqrt();
+        
+        // Variance = ((10-20)² + (20-20)² + (30-20)²) / 3 = (100 + 0 + 100) / 3 = 66.67
+        // Stddev = sqrt(66.67) ≈ 8.16
+        assert!((variance - 200.0/3.0).abs() < 0.01);
+        assert!((stddev - (200.0/3.0_f64).sqrt()).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn test_ping_invalid_target() {
+        let config = PingConfig {
+            target: "invalid.domain.that.should.not.exist.ever".to_string(),
+            count: 1,
+            timeout: Duration::from_millis(100),
+            ..Default::default()
+        };
+        let result = ping(&config).await;
+        assert!(result.is_err());
     }
 }

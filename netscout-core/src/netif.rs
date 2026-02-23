@@ -318,11 +318,71 @@ mod tests {
     }
 
     #[test]
+    fn test_scope_for_v4_private_ranges() {
+        // Test all RFC 1918 private ranges
+        assert_eq!(scope_for_v4(Ipv4Addr::new(10, 0, 0, 1)), "private");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(10, 255, 255, 254)), "private");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(172, 16, 0, 1)), "private");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(172, 31, 255, 254)), "private");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(192, 168, 0, 1)), "private");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(192, 168, 255, 254)), "private");
+    }
+
+    #[test]
+    fn test_scope_for_v4_link_local() {
+        // Test link-local range (169.254.0.0/16)
+        assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 0, 1)), "link-local");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 100, 200)), "link-local");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 255, 254)), "link-local");
+    }
+
+    #[test]
+    fn test_scope_for_v4_global() {
+        // Test various global addresses
+        assert_eq!(scope_for_v4(Ipv4Addr::new(8, 8, 8, 8)), "global");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(1, 1, 1, 1)), "global");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(93, 184, 216, 34)), "global"); // example.com
+        assert_eq!(scope_for_v4(Ipv4Addr::new(208, 67, 222, 222)), "global"); // OpenDNS
+    }
+
+    #[test]
+    fn test_scope_for_v4_loopback_variants() {
+        assert_eq!(scope_for_v4(Ipv4Addr::new(127, 0, 0, 1)), "loopback");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(127, 0, 0, 2)), "loopback");
+        assert_eq!(scope_for_v4(Ipv4Addr::new(127, 255, 255, 254)), "loopback");
+    }
+
+    #[test]
     fn test_scope_for_v6() {
         assert_eq!(scope_for_v6(Ipv6Addr::LOCALHOST), "loopback");
         assert_eq!(scope_for_v6("fe80::1".parse().unwrap()), "link-local");
         assert_eq!(scope_for_v6("fd00::1".parse().unwrap()), "unique-local");
         assert_eq!(scope_for_v6("2001:db8::1".parse().unwrap()), "global");
+    }
+
+    #[test]
+    fn test_scope_for_v6_link_local_range() {
+        // Test various link-local addresses (fe80::/10)
+        assert_eq!(scope_for_v6("fe80::1234:5678:9abc:def0".parse().unwrap()), "link-local");
+        assert_eq!(scope_for_v6("fe80::dead:beef".parse().unwrap()), "link-local");
+        assert_eq!(scope_for_v6("feb0::1".parse().unwrap()), "link-local");
+        assert_eq!(scope_for_v6("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()), "link-local");
+    }
+
+    #[test]
+    fn test_scope_for_v6_unique_local_range() {
+        // Test unique local addresses (fc00::/7)
+        assert_eq!(scope_for_v6("fc00::1".parse().unwrap()), "unique-local");
+        assert_eq!(scope_for_v6("fd00::1".parse().unwrap()), "unique-local");
+        assert_eq!(scope_for_v6("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()), "unique-local");
+    }
+
+    #[test]
+    fn test_scope_for_v6_global() {
+        // Test various global unicast addresses
+        assert_eq!(scope_for_v6("2001:4860:4860::8888".parse().unwrap()), "global"); // Google DNS
+        assert_eq!(scope_for_v6("2606:4700:4700::1111".parse().unwrap()), "global"); // Cloudflare DNS
+        assert_eq!(scope_for_v6("2001:db8::1".parse().unwrap()), "global"); // Documentation
     }
 
     #[test]
@@ -336,6 +396,94 @@ mod tests {
     }
 
     #[test]
+    fn test_count_v6_prefix_various() {
+        // Test /48
+        let mask_48 = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(count_v6_prefix(&mask_48), 48);
+        
+        // Test /56
+        let mask_56 = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(count_v6_prefix(&mask_56), 56);
+        
+        // Test /0 (all zeros)
+        let mask_0 = [0; 16];
+        assert_eq!(count_v6_prefix(&mask_0), 0);
+    }
+
+    #[test]
+    fn test_count_v6_prefix_partial_bytes() {
+        // Test partial byte masks
+        let mask_partial = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xf0, // 60 bits
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(count_v6_prefix(&mask_partial), 60);
+        
+        let mask_partial2 = [
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc0, // 58 bits
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(count_v6_prefix(&mask_partial2), 58);
+    }
+
+    #[test]
+    fn test_network_interface_serialization() {
+        let interface = NetworkInterface {
+            name: "eth0".to_string(),
+            index: 2,
+            is_up: true,
+            is_loopback: false,
+            addresses: vec![],
+            mtu: Some(1500),
+        };
+        let json = serde_json::to_string(&interface).unwrap();
+        assert!(json.contains("eth0"));
+        assert!(json.contains("true"));
+        assert!(json.contains("1500"));
+    }
+
+    #[test]
+    fn test_interface_address_serialization() {
+        let addr = InterfaceAddress {
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
+            prefix_len: Some(24),
+            scope: "private".to_string(),
+        };
+        let json = serde_json::to_string(&addr).unwrap();
+        assert!(json.contains("192.168.1.100"));
+        assert!(json.contains("24"));
+        assert!(json.contains("private"));
+    }
+
+    #[test]
+    fn test_interface_address_ipv6() {
+        let addr = InterfaceAddress {
+            ip: IpAddr::V6("2001:db8::1".parse().unwrap()),
+            prefix_len: Some(64),
+            scope: "global".to_string(),
+        };
+        assert!(matches!(addr.ip, IpAddr::V6(_)));
+        assert_eq!(addr.prefix_len, Some(64));
+        assert_eq!(addr.scope, "global");
+    }
+
+    #[test]
+    fn test_netif_result_serialization() {
+        let result = NetifResult {
+            interfaces: vec![],
+            total: 5,
+            up_count: 3,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("5"));
+        assert!(json.contains("3"));
+    }
+
+    #[test]
     fn test_list_interfaces_works() {
         // Should succeed on any system
         let result = list_interfaces().unwrap();
@@ -345,5 +493,55 @@ mod tests {
             result.interfaces.iter().any(|i| i.is_loopback),
             "Should have a loopback interface"
         );
+        
+        // Verify counts match
+        let actual_up_count = result.interfaces.iter().filter(|i| i.is_up).count();
+        assert_eq!(result.up_count, actual_up_count);
+        assert_eq!(result.total, result.interfaces.len());
+    }
+
+    #[test]
+    fn test_network_interface_properties() {
+        let interface = NetworkInterface {
+            name: "lo".to_string(),
+            index: 1,
+            is_up: true,
+            is_loopback: true,
+            addresses: vec![
+                InterfaceAddress {
+                    ip: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                    prefix_len: Some(8),
+                    scope: "loopback".to_string(),
+                },
+                InterfaceAddress {
+                    ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+                    prefix_len: Some(128),
+                    scope: "loopback".to_string(),
+                },
+            ],
+            mtu: Some(65536),
+        };
+        
+        assert_eq!(interface.name, "lo");
+        assert!(interface.is_loopback);
+        assert!(interface.is_up);
+        assert_eq!(interface.addresses.len(), 2);
+        assert_eq!(interface.mtu, Some(65536));
+    }
+
+    #[test]
+    fn test_interface_without_mtu() {
+        let interface = NetworkInterface {
+            name: "dummy0".to_string(),
+            index: 10,
+            is_up: false,
+            is_loopback: false,
+            addresses: vec![],
+            mtu: None,
+        };
+        
+        assert!(interface.mtu.is_none());
+        assert!(!interface.is_up);
+        assert!(interface.addresses.is_empty());
     }
 }

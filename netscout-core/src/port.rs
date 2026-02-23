@@ -75,13 +75,12 @@ pub fn parse_ports(s: &str) -> Result<Vec<u16>, String> {
 /// Return the top 100 most common ports.
 pub fn top_ports() -> Vec<u16> {
     vec![
-        21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 993, 995, 1723, 3306, 3389,
-        5900, 8080, 8443, 8888, 20, 26, 69, 79, 81, 88, 106, 113, 119, 123, 137, 138, 161, 162,
-        179, 194, 389, 427, 443, 465, 500, 514, 515, 520, 521, 546, 547, 554, 563, 587, 593, 631,
-        636, 691, 860, 873, 902, 989, 990, 993, 995, 1025, 1026, 1027, 1028, 1029, 1080, 1194,
-        1214, 1241, 1311, 1337, 1433, 1434, 1512, 1589, 1701, 1723, 1725, 1741, 1755, 1812, 1813,
-        1863, 1900, 1985, 2000, 2049, 2082, 2083, 2100, 2222, 2483, 2484, 2745, 3000, 3128, 3268,
-        3306, 3389,
+        20, 21, 22, 23, 25, 26, 53, 69, 79, 80, 81, 88, 106, 110, 111, 113, 119, 123, 135, 137,
+        138, 139, 143, 161, 162, 179, 194, 389, 427, 443, 445, 465, 500, 514, 515, 520, 521, 546,
+        547, 554, 563, 587, 593, 631, 636, 691, 860, 873, 902, 989, 990, 993, 995, 1025, 1026,
+        1027, 1028, 1029, 1080, 1194, 1214, 1241, 1311, 1337, 1433, 1434, 1512, 1589, 1701, 1723,
+        1725, 1741, 1755, 1812, 1813, 1863, 1900, 1985, 2000, 2049, 2082, 2083, 2100, 2222, 2483,
+        2484, 2745, 3000, 3128, 3268, 3306, 3389, 5900, 8080, 8443, 8888,
     ]
 }
 
@@ -235,9 +234,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_ports_csv_with_spaces() {
+        let ports = parse_ports("22, 80, 443, 8080").unwrap();
+        assert_eq!(ports, vec![22, 80, 443, 8080]);
+    }
+
+    #[test]
     fn test_parse_ports_range() {
         let ports = parse_ports("8000-8003").unwrap();
         assert_eq!(ports, vec![8000, 8001, 8002, 8003]);
+    }
+
+    #[test]
+    fn test_parse_ports_range_with_spaces() {
+        let ports = parse_ports("100 - 102").unwrap();
+        assert_eq!(ports, vec![100, 101, 102]);
     }
 
     #[test]
@@ -247,9 +258,51 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_ports_mixed_complex() {
+        let ports = parse_ports("21,22,80,443,8000-8002,9090").unwrap();
+        assert_eq!(ports, vec![21, 22, 80, 443, 8000, 8001, 8002, 9090]);
+    }
+
+    #[test]
+    fn test_parse_ports_single_range() {
+        let ports = parse_ports("80-80").unwrap();
+        assert_eq!(ports, vec![80]);
+    }
+
+    #[test]
+    fn test_parse_ports_large_range() {
+        let ports = parse_ports("8000-8010").unwrap();
+        assert_eq!(ports.len(), 11);
+        assert_eq!(ports[0], 8000);
+        assert_eq!(ports[10], 8010);
+    }
+
+    #[test]
     fn test_parse_ports_invalid() {
         assert!(parse_ports("abc").is_err());
         assert!(parse_ports("100-50").is_err());
+        assert!(parse_ports("65536").is_err()); // Port > 65535
+        assert!(parse_ports("-100").is_err());
+        assert!(parse_ports("80,").is_err());
+    }
+
+    #[test]
+    fn test_parse_ports_empty() {
+        assert!(parse_ports("").is_err());
+        assert!(parse_ports(" ").is_err());
+    }
+
+    #[test]
+    fn test_parse_ports_edge_values() {
+        let ports = parse_ports("1,65535").unwrap();
+        assert_eq!(ports, vec![1, 65535]);
+    }
+
+    #[test]
+    fn test_parse_ports_invalid_range() {
+        assert!(parse_ports("80-").is_err());
+        assert!(parse_ports("-443").is_err());
+        assert!(parse_ports("80--443").is_err());
     }
 
     #[test]
@@ -258,6 +311,18 @@ mod tests {
         assert!(ports.len() >= 50);
         assert!(ports.contains(&80));
         assert!(ports.contains(&443));
+        assert!(ports.contains(&22));
+        assert!(ports.contains(&21));
+        assert!(ports.contains(&25));
+    }
+
+    #[test]
+    fn test_top_ports_unique() {
+        let ports = top_ports();
+        let mut sorted_ports = ports.clone();
+        sorted_ports.sort_unstable();
+        sorted_ports.dedup();
+        assert_eq!(ports.len(), sorted_ports.len(), "Top ports should not contain duplicates");
     }
 
     #[test]
@@ -266,5 +331,122 @@ mod tests {
         assert_eq!(m.get(&80), Some(&"http"));
         assert_eq!(m.get(&443), Some(&"https"));
         assert_eq!(m.get(&22), Some(&"ssh"));
+        assert_eq!(m.get(&21), Some(&"ftp"));
+        assert_eq!(m.get(&25), Some(&"smtp"));
+        assert_eq!(m.get(&53), Some(&"dns"));
+    }
+
+    #[test]
+    fn test_service_map_database_ports() {
+        let m = service_map();
+        assert_eq!(m.get(&3306), Some(&"mysql"));
+        assert_eq!(m.get(&5432), Some(&"postgresql"));
+        assert_eq!(m.get(&27017), Some(&"mongodb"));
+        assert_eq!(m.get(&6379), Some(&"redis"));
+    }
+
+    #[test]
+    fn test_service_map_unknown_port() {
+        let m = service_map();
+        assert_eq!(m.get(&65534), None);
+        assert_eq!(m.get(&12345), None);
+    }
+
+    #[test]
+    fn test_port_config_default() {
+        let cfg = PortConfig::default();
+        assert!(cfg.target.is_empty());
+        assert_eq!(cfg.timeout, Duration::from_secs(2));
+        assert_eq!(cfg.parallel, 100);
+        assert!(!cfg.ports.is_empty()); // Should have top ports
+    }
+
+    #[test]
+    fn test_port_config_custom() {
+        let cfg = PortConfig {
+            target: "example.com".to_string(),
+            ports: vec![80, 443],
+            timeout: Duration::from_secs(5),
+            parallel: 50,
+        };
+        assert_eq!(cfg.target, "example.com");
+        assert_eq!(cfg.ports, vec![80, 443]);
+        assert_eq!(cfg.timeout, Duration::from_secs(5));
+        assert_eq!(cfg.parallel, 50);
+    }
+
+    #[test]
+    fn test_port_result_serialization() {
+        let result = PortResult {
+            port: 80,
+            open: true,
+            service: Some("http".to_string()),
+            rtt_ms: Some(15.5),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("80"));
+        assert!(json.contains("true"));
+        assert!(json.contains("http"));
+        assert!(json.contains("15.5"));
+    }
+
+    #[test]
+    fn test_port_result_closed() {
+        let result = PortResult {
+            port: 8888,
+            open: false,
+            service: None,
+            rtt_ms: None,
+        };
+        assert!(!result.open);
+        assert!(result.service.is_none());
+        assert!(result.rtt_ms.is_none());
+    }
+
+    #[test]
+    fn test_scan_result_serialization() {
+        let result = ScanResult {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            ports: vec![],
+            open_count: 2,
+            closed_count: 8,
+            scan_time_ms: 1234.5,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("example.com"));
+        assert!(json.contains("93.184.216.34"));
+        assert!(json.contains("1234.5"));
+    }
+
+    #[test]
+    fn test_scan_result_with_ports() {
+        let ports = vec![
+            PortResult {
+                port: 80,
+                open: true,
+                service: Some("http".to_string()),
+                rtt_ms: Some(10.0),
+            },
+            PortResult {
+                port: 443,
+                open: true,
+                service: Some("https".to_string()),
+                rtt_ms: Some(12.5),
+            },
+        ];
+        let result = ScanResult {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            ports,
+            open_count: 2,
+            closed_count: 8,
+            scan_time_ms: 500.0,
+        };
+        
+        assert_eq!(result.ports.len(), 2);
+        assert_eq!(result.open_count, 2);
+        assert_eq!(result.closed_count, 8);
+        assert!(result.ports.iter().all(|p| p.open));
     }
 }

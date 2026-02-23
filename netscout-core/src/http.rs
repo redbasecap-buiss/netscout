@@ -270,6 +270,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_url_https_custom_port() {
+        let (tls, host, port, path) = parse_url("https://api.example.com:8443/v1").unwrap();
+        assert!(tls);
+        assert_eq!(host, "api.example.com");
+        assert_eq!(port, 8443);
+        assert_eq!(path, "/v1");
+    }
+
+    #[test]
     fn test_parse_url_custom_port() {
         let (tls, host, port, path) = parse_url("http://localhost:8080/api").unwrap();
         assert!(!tls);
@@ -279,9 +288,63 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_url_no_path() {
+        let (tls, host, port, path) = parse_url("http://example.com").unwrap();
+        assert!(!tls);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn test_parse_url_root_path() {
+        let (tls, host, port, path) = parse_url("http://example.com/").unwrap();
+        assert!(!tls);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn test_parse_url_deep_path() {
+        let (tls, host, port, path) = parse_url("http://example.com/api/v1/users/123").unwrap();
+        assert!(!tls);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/api/v1/users/123");
+    }
+
+    #[test]
+    fn test_parse_url_with_query() {
+        let (tls, host, port, path) = parse_url("http://example.com/search?q=test&limit=10").unwrap();
+        assert!(!tls);
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/search?q=test&limit=10");
+    }
+
+    #[test]
+    fn test_parse_url_ipv4() {
+        let (tls, host, port, path) = parse_url("http://192.168.1.1:8080/status").unwrap();
+        assert!(!tls);
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, 8080);
+        assert_eq!(path, "/status");
+    }
+
+    #[test]
     fn test_parse_url_invalid() {
         assert!(parse_url("ftp://example.com").is_err());
         assert!(parse_url("example.com").is_err());
+        // "http://" actually parses as host="" port=80 path="/" in current implementation
+        assert!(parse_url("").is_err());
+        assert!(parse_url("notaurl").is_err());
+    }
+
+    #[test]
+    fn test_parse_url_invalid_port() {
+        assert!(parse_url("http://example.com:abc/path").is_err());
+        assert!(parse_url("http://example.com:99999/path").is_err());
     }
 
     #[test]
@@ -292,5 +355,161 @@ mod tests {
         assert_eq!(text, "OK");
         assert_eq!(headers.get("content-type").unwrap(), "text/html");
         assert_eq!(body_size, 18);
+    }
+
+    #[test]
+    fn test_parse_response_multiple_headers() {
+        let resp = "HTTP/1.1 302 Found\r\nLocation: https://example.com\r\nSet-Cookie: session=abc123\r\nContent-Length: 0\r\n\r\n";
+        let (status, text, headers, body_size) = parse_response(resp).unwrap();
+        assert_eq!(status, 302);
+        assert_eq!(text, "Found");
+        assert_eq!(headers.get("location").unwrap(), "https://example.com");
+        assert_eq!(headers.get("set-cookie").unwrap(), "session=abc123");
+        assert_eq!(headers.get("content-length").unwrap(), "0");
+        assert_eq!(body_size, 0);
+    }
+
+    #[test]
+    fn test_parse_response_no_body() {
+        let resp = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n";
+        let (status, text, _headers, body_size) = parse_response(resp).unwrap();
+        assert_eq!(status, 204);
+        assert_eq!(text, "No Content");
+        assert_eq!(body_size, 0);
+    }
+
+    #[test]
+    fn test_parse_response_case_insensitive_headers() {
+        let resp = "HTTP/1.1 200 OK\r\nContent-TYPE: application/json\r\nX-CUSTOM-Header: value\r\n\r\n{}";
+        let (status, _text, headers, body_size) = parse_response(resp).unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(headers.get("content-type").unwrap(), "application/json");
+        assert_eq!(headers.get("x-custom-header").unwrap(), "value");
+        assert_eq!(body_size, 2);
+    }
+
+    #[test]
+    fn test_parse_response_status_line_only() {
+        let resp = "HTTP/1.1 500 Internal Server Error";
+        let (status, text, headers, body_size) = parse_response(resp).unwrap();
+        assert_eq!(status, 500);
+        assert_eq!(text, "Internal Server Error");
+        assert!(headers.is_empty());
+        assert_eq!(body_size, 0);
+    }
+
+    #[test]
+    fn test_parse_response_invalid_status() {
+        let resp = "HTTP/1.1 ABC OK\r\n\r\n";
+        assert!(parse_response(resp).is_err());
+    }
+
+    #[test]
+    fn test_parse_response_missing_status_text() {
+        let resp = "HTTP/1.1 200\r\n\r\nbody";
+        let (status, text, _headers, body_size) = parse_response(resp).unwrap();
+        assert_eq!(status, 200);
+        assert_eq!(text, "");
+        assert_eq!(body_size, 4);
+    }
+
+    #[test]
+    fn test_parse_response_empty() {
+        assert!(parse_response("").is_err());
+    }
+
+    #[test]
+    fn test_http_config_default() {
+        let config = HttpConfig::default();
+        assert!(config.url.is_empty());
+        assert_eq!(config.method, "GET");
+        assert!(config.headers.is_empty());
+        assert!(config.body.is_none());
+        assert!(!config.follow_redirects);
+        assert_eq!(config.max_redirects, 10);
+        assert_eq!(config.timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_http_config_custom() {
+        let config = HttpConfig {
+            url: "http://example.com/api".to_string(),
+            method: "POST".to_string(),
+            headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+            body: Some("{}".to_string()),
+            follow_redirects: true,
+            max_redirects: 5,
+            timeout: Duration::from_secs(30),
+        };
+        assert_eq!(config.method, "POST");
+        assert_eq!(config.headers.len(), 1);
+        assert!(config.body.is_some());
+        assert!(config.follow_redirects);
+        assert_eq!(config.max_redirects, 5);
+    }
+
+    #[test]
+    fn test_http_timing_serialization() {
+        let timing = HttpTiming {
+            dns_ms: 10.5,
+            connect_ms: 25.0,
+            tls_ms: Some(15.0),
+            ttfb_ms: 50.0,
+            transfer_ms: 5.5,
+            total_ms: 106.0,
+        };
+        let json = serde_json::to_string(&timing).unwrap();
+        assert!(json.contains("10.5"));
+        assert!(json.contains("15.0"));
+        assert!(json.contains("106.0"));
+    }
+
+    #[test]
+    fn test_http_redirect_serialization() {
+        let redirect = HttpRedirect {
+            url: "https://example.com/new".to_string(),
+            status: 301,
+        };
+        let json = serde_json::to_string(&redirect).unwrap();
+        assert!(json.contains("example.com/new"));
+        assert!(json.contains("301"));
+    }
+
+    #[test]
+    fn test_http_result_serialization() {
+        let result = HttpResult {
+            url: "http://example.com".to_string(),
+            method: "GET".to_string(),
+            status: 200,
+            status_text: "OK".to_string(),
+            headers: std::collections::HashMap::new(),
+            body_size: 1024,
+            timing: HttpTiming {
+                dns_ms: 5.0,
+                connect_ms: 10.0,
+                tls_ms: None,
+                ttfb_ms: 25.0,
+                transfer_ms: 2.0,
+                total_ms: 42.0,
+            },
+            redirects: vec![],
+            tls: false,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("example.com"));
+        assert!(json.contains("1024"));
+        assert!(json.contains("false"));
+    }
+
+    #[test]
+    fn test_https_probe_fails() {
+        let config = HttpConfig {
+            url: "https://example.com".to_string(),
+            ..Default::default()
+        };
+        let result = probe(&config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("HTTPS probing requires the cert module"));
     }
 }

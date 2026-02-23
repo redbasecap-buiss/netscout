@@ -164,16 +164,64 @@ mod tests {
     #[test]
     fn test_whois_server_for_com() {
         assert_eq!(whois_server_for("example.com"), "whois.verisign-grs.com");
+        assert_eq!(whois_server_for("google.com"), "whois.verisign-grs.com");
+        assert_eq!(whois_server_for("test.net"), "whois.verisign-grs.com");
     }
 
     #[test]
     fn test_whois_server_for_org() {
         assert_eq!(whois_server_for("example.org"), "whois.pir.org");
+        assert_eq!(whois_server_for("mozilla.org"), "whois.pir.org");
+    }
+
+    #[test]
+    fn test_whois_server_for_google_tlds() {
+        assert_eq!(whois_server_for("example.dev"), "whois.nic.google");
+        assert_eq!(whois_server_for("myapp.app"), "whois.nic.google");
+    }
+
+    #[test]
+    fn test_whois_server_for_country_tlds() {
+        assert_eq!(whois_server_for("example.de"), "whois.denic.de");
+        assert_eq!(whois_server_for("example.uk"), "whois.nic.uk");
+        assert_eq!(whois_server_for("example.fr"), "whois.nic.fr");
+        assert_eq!(whois_server_for("example.ch"), "whois.nic.ch");
+    }
+
+    #[test]
+    fn test_whois_server_for_new_tlds() {
+        assert_eq!(whois_server_for("example.io"), "whois.nic.io");
+        assert_eq!(whois_server_for("example.xyz"), "whois.nic.xyz");
+        assert_eq!(whois_server_for("example.info"), "whois.afilias.net");
+        assert_eq!(whois_server_for("example.me"), "whois.nic.me");
+        assert_eq!(whois_server_for("example.co"), "whois.nic.co");
+        assert_eq!(whois_server_for("example.ai"), "whois.nic.ai");
     }
 
     #[test]
     fn test_whois_server_for_unknown() {
         assert_eq!(whois_server_for("example.zzzz"), "whois.iana.org");
+        assert_eq!(whois_server_for("test.nonexistent"), "whois.iana.org");
+    }
+
+    #[test]
+    fn test_whois_server_case_insensitive() {
+        assert_eq!(whois_server_for("EXAMPLE.COM"), "whois.verisign-grs.com");
+        assert_eq!(whois_server_for("Example.ORG"), "whois.pir.org");
+        assert_eq!(whois_server_for("test.IO"), "whois.nic.io");
+    }
+
+    #[test]
+    fn test_whois_server_subdomain() {
+        assert_eq!(whois_server_for("www.example.com"), "whois.verisign-grs.com");
+        assert_eq!(whois_server_for("api.test.org"), "whois.pir.org");
+        assert_eq!(whois_server_for("sub.domain.xyz"), "whois.nic.xyz");
+    }
+
+    #[test]
+    fn test_whois_server_no_tld() {
+        assert_eq!(whois_server_for("example"), "whois.iana.org");
+        assert_eq!(whois_server_for(""), "whois.iana.org");
     }
 
     #[test]
@@ -191,6 +239,50 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_field_case_insensitive() {
+        let text = "DOMAIN NAME: example.com\nREGISTRAR: GoDaddy LLC\nCREATION DATE: 2020-01-01T12:00:00Z\n";
+        assert_eq!(
+            extract_field(text, &["domain name"]),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            extract_field(text, &["registrar"]),
+            Some("GoDaddy LLC".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_field_multiple_keys() {
+        let text = "Created: 2020-01-01\nLast Updated: 2021-01-01\n";
+        assert_eq!(
+            extract_field(text, &["Creation Date", "Created", "created"]),
+            Some("2020-01-01".to_string())
+        );
+        assert_eq!(
+            extract_field(text, &["Updated Date", "Last Updated", "changed"]),
+            Some("2021-01-01".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_field_empty_value() {
+        let text = "Domain Name:\nRegistrar: \nCreation Date: 2020-01-01\n";
+        assert_eq!(extract_field(text, &["Domain Name"]), None);
+        assert_eq!(extract_field(text, &["Registrar"]), None);
+        assert_eq!(
+            extract_field(text, &["Creation Date"]),
+            Some("2020-01-01".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_field_no_colon() {
+        let text = "Domain Name example.com\nRegistrar GoDaddy\n";
+        assert_eq!(extract_field(text, &["Domain Name"]), None);
+        assert_eq!(extract_field(text, &["Registrar"]), None);
+    }
+
+    #[test]
     fn test_extract_all() {
         let text = "Name Server: ns1.example.com\nName Server: ns2.example.com\n";
         let ns = extract_all(text, &["Name Server"]);
@@ -200,8 +292,97 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_all_mixed_case() {
+        let text = "Name Server: ns1.example.com\nname server: ns2.example.com\nNAME SERVER: ns3.example.com\n";
+        let ns = extract_all(text, &["Name Server"]);
+        assert_eq!(ns.len(), 3);
+        assert!(ns.contains(&"ns1.example.com".to_string()));
+        assert!(ns.contains(&"ns2.example.com".to_string()));
+        assert!(ns.contains(&"ns3.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_extract_all_empty_values() {
+        let text = "Name Server: ns1.example.com\nName Server: \nName Server: ns2.example.com\n";
+        let ns = extract_all(text, &["Name Server"]);
+        assert_eq!(ns.len(), 2); // Empty values should be skipped
+        assert_eq!(ns[0], "ns1.example.com");
+        assert_eq!(ns[1], "ns2.example.com");
+    }
+
+    #[test]
+    fn test_extract_all_no_matches() {
+        let text = "Domain Name: example.com\nRegistrar: GoDaddy\n";
+        let ns = extract_all(text, &["Name Server"]);
+        assert!(ns.is_empty());
+    }
+
+    #[test]
+    fn test_extract_all_multiple_keys() {
+        let text = "Name Server: ns1.example.com\nnserver: ns2.example.com\nnameserver: ns3.example.com\n";
+        let ns = extract_all(text, &["Name Server", "nserver", "nameserver"]);
+        assert_eq!(ns.len(), 3);
+    }
+
+    #[test]
     fn test_whois_config_default() {
         let cfg = WhoisConfig::default();
+        assert!(cfg.target.is_empty());
         assert!(cfg.server.is_none());
+        assert_eq!(cfg.timeout, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_whois_config_custom() {
+        let cfg = WhoisConfig {
+            target: "example.com".to_string(),
+            server: Some("whois.verisign-grs.com".to_string()),
+            timeout: Duration::from_secs(5),
+        };
+        assert_eq!(cfg.target, "example.com");
+        assert!(cfg.server.is_some());
+        assert_eq!(cfg.timeout, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_whois_result_serialization() {
+        let result = WhoisResult {
+            target: "example.com".to_string(),
+            server: "whois.verisign-grs.com".to_string(),
+            registrar: Some("GoDaddy LLC".to_string()),
+            creation_date: Some("1995-08-14T04:00:00Z".to_string()),
+            expiry_date: Some("2025-08-13T04:00:00Z".to_string()),
+            updated_date: Some("2021-08-14T07:01:44Z".to_string()),
+            nameservers: vec!["a.iana-servers.net".to_string(), "b.iana-servers.net".to_string()],
+            status: vec!["clientDeleteProhibited".to_string(), "clientTransferProhibited".to_string()],
+            raw: "Raw WHOIS data here...".to_string(),
+            query_time_ms: 1250.5,
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("example.com"));
+        assert!(json.contains("GoDaddy LLC"));
+        assert!(json.contains("a.iana-servers.net"));
+        assert!(json.contains("1250.5"));
+    }
+
+    #[test]
+    fn test_whois_result_minimal() {
+        let result = WhoisResult {
+            target: "example.com".to_string(),
+            server: "whois.iana.org".to_string(),
+            registrar: None,
+            creation_date: None,
+            expiry_date: None,
+            updated_date: None,
+            nameservers: vec![],
+            status: vec![],
+            raw: "No match for domain".to_string(),
+            query_time_ms: 500.0,
+        };
+        
+        assert!(result.registrar.is_none());
+        assert!(result.creation_date.is_none());
+        assert!(result.nameservers.is_empty());
+        assert_eq!(result.target, "example.com");
     }
 }

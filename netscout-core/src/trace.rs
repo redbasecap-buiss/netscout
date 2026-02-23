@@ -151,6 +151,22 @@ mod tests {
         let cfg = TraceConfig::default();
         assert_eq!(cfg.max_hops, 30);
         assert_eq!(cfg.port, 80);
+        assert_eq!(cfg.timeout, Duration::from_secs(2));
+        assert_eq!(cfg.target, "");
+    }
+
+    #[test]
+    fn test_trace_config_custom() {
+        let cfg = TraceConfig {
+            target: "example.com".to_string(),
+            max_hops: 15,
+            timeout: Duration::from_secs(5),
+            port: 443,
+        };
+        assert_eq!(cfg.target, "example.com");
+        assert_eq!(cfg.max_hops, 15);
+        assert_eq!(cfg.port, 443);
+        assert_eq!(cfg.timeout, Duration::from_secs(5));
     }
 
     #[test]
@@ -165,6 +181,38 @@ mod tests {
         let json = serde_json::to_string(&hop).unwrap();
         assert!(json.contains("router.example.com"));
         assert!(json.contains("5.2"));
+        assert!(json.contains("1.2.3.4"));
+        assert!(json.contains("false"));
+    }
+
+    #[test]
+    fn test_trace_hop_timeout() {
+        let hop = TraceHop {
+            hop: 5,
+            addr: None,
+            hostname: None,
+            rtt_ms: None,
+            timed_out: true,
+        };
+        let json = serde_json::to_string(&hop).unwrap();
+        assert!(json.contains("true"));
+        assert!(json.contains("\"addr\":null"));
+        assert!(json.contains("\"hostname\":null"));
+        assert!(json.contains("\"rtt_ms\":null"));
+    }
+
+    #[test]
+    fn test_trace_hop_no_hostname() {
+        let hop = TraceHop {
+            hop: 2,
+            addr: Some("10.0.0.1".into()),
+            hostname: None,
+            rtt_ms: Some(15.7),
+            timed_out: false,
+        };
+        assert_eq!(hop.addr.as_ref().unwrap(), "10.0.0.1");
+        assert!(hop.hostname.is_none());
+        assert!(!hop.timed_out);
     }
 
     #[test]
@@ -177,6 +225,45 @@ mod tests {
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("example.com"));
+        assert!(json.contains("93.184.216.34"));
+        assert!(json.contains("false"));
+    }
+
+    #[test]
+    fn test_trace_result_with_hops() {
+        let hop1 = TraceHop {
+            hop: 1,
+            addr: Some("192.168.1.1".into()),
+            hostname: Some("gateway".into()),
+            rtt_ms: Some(1.0),
+            timed_out: false,
+        };
+        let hop2 = TraceHop {
+            hop: 2,
+            addr: None,
+            hostname: None,
+            rtt_ms: None,
+            timed_out: true,
+        };
+        let result = TraceResult {
+            target: "example.com".into(),
+            resolved_addr: "93.184.216.34".into(),
+            hops: vec![hop1, hop2],
+            reached: true,
+        };
+        assert_eq!(result.hops.len(), 2);
+        assert!(result.reached);
+        assert_eq!(result.hops[0].hop, 1);
+        assert_eq!(result.hops[1].hop, 2);
+    }
+
+    #[test]
+    fn test_dns_lookup_reverse_returns_none() {
+        use std::net::{IpAddr, Ipv4Addr};
+        let addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 80);
+        let result = dns_lookup_reverse(addr);
+        // Current implementation always returns None
+        assert!(result.is_none());
     }
 
     #[tokio::test]
@@ -187,5 +274,95 @@ mod tests {
         };
         let result = trace(&config).await;
         assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("Failed to resolve"));
+    }
+
+    #[tokio::test]
+    async fn test_trace_localhost() {
+        let config = TraceConfig {
+            target: "127.0.0.1".into(),
+            port: 80,
+            timeout: Duration::from_millis(100),
+            max_hops: 1,
+        };
+        let result = trace(&config).await;
+        // This might succeed or fail depending on whether port 80 is open on localhost
+        // The test verifies the function doesn't panic and returns a proper result
+        if let Ok(trace_result) = result {
+            assert_eq!(trace_result.target, "127.0.0.1");
+            assert_eq!(trace_result.resolved_addr, "127.0.0.1");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_trace_unreachable_host() {
+        let config = TraceConfig {
+            target: "192.0.2.1".into(), // Non-routable IP
+            port: 80,
+            timeout: Duration::from_millis(50),
+            max_hops: 2,
+        };
+        let result = trace(&config).await;
+        if let Ok(trace_result) = result {
+            assert_eq!(trace_result.target, "192.0.2.1");
+            assert_eq!(trace_result.resolved_addr, "192.0.2.1");
+            // Should timeout and not reach destination
+            assert!(!trace_result.reached);
+        }
+    }
+
+    #[test]
+    fn test_trace_config_validation() {
+        let cfg = TraceConfig {
+            target: "".into(),
+            max_hops: 0,
+            timeout: Duration::from_secs(0),
+            port: 0,
+        };
+        // These are edge cases that should be handled gracefully
+        assert_eq!(cfg.max_hops, 0);
+        assert_eq!(cfg.port, 0);
+        assert!(cfg.target.is_empty());
+    }
+
+    #[test]
+    fn test_trace_hop_display_properties() {
+        let hop = TraceHop {
+            hop: 10,
+            addr: Some("203.0.113.1".into()),
+            hostname: Some("backbone.provider.com".into()),
+            rtt_ms: Some(45.123),
+            timed_out: false,
+        };
+        
+        // Test various properties
+        assert_eq!(hop.hop, 10);
+        assert_eq!(hop.addr.as_ref().unwrap(), "203.0.113.1");
+        assert_eq!(hop.hostname.as_ref().unwrap(), "backbone.provider.com");
+        assert!(hop.rtt_ms.unwrap() > 45.0);
+        assert!(hop.rtt_ms.unwrap() < 46.0);
+    }
+
+    #[test]
+    fn test_trace_result_reached_destination() {
+        let result = TraceResult {
+            target: "example.com".into(),
+            resolved_addr: "93.184.216.34".into(),
+            hops: vec![
+                TraceHop {
+                    hop: 1,
+                    addr: Some("93.184.216.34".into()),
+                    hostname: Some("example.com".into()),
+                    rtt_ms: Some(25.0),
+                    timed_out: false,
+                }
+            ],
+            reached: true,
+        };
+        
+        assert!(result.reached);
+        assert_eq!(result.hops.len(), 1);
+        assert_eq!(result.target, "example.com");
     }
 }

@@ -49,6 +49,9 @@ fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
         Some((h, p)) => (h.to_string(), p.parse::<u16>().map_err(|_| "Bad port")?),
         None => (host_port.to_string(), 80),
     };
+    if host.is_empty() {
+        return Err("Empty host".to_string());
+    }
     Ok((host, port, path.to_string()))
 }
 
@@ -143,6 +146,34 @@ mod tests {
         assert!(cfg.download_url.contains("cloudflare"));
         assert!(!cfg.download_only);
         assert!(!cfg.upload_only);
+        assert!(cfg.upload_url.is_none());
+        assert_eq!(cfg.timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_speed_config_custom() {
+        let cfg = SpeedConfig {
+            download_url: "http://test.example.com/10MB".to_string(),
+            upload_url: Some("http://test.example.com/upload".to_string()),
+            download_only: true,
+            upload_only: false,
+            timeout: Duration::from_secs(60),
+        };
+        assert_eq!(cfg.download_url, "http://test.example.com/10MB");
+        assert!(cfg.upload_url.is_some());
+        assert!(cfg.download_only);
+        assert!(!cfg.upload_only);
+    }
+
+    #[test]
+    fn test_speed_config_upload_only() {
+        let cfg = SpeedConfig {
+            upload_only: true,
+            download_only: false,
+            ..Default::default()
+        };
+        assert!(cfg.upload_only);
+        assert!(!cfg.download_only);
     }
 
     #[test]
@@ -162,19 +193,162 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_http_url_no_path() {
+        let (host, port, path) = parse_http_url("http://example.com").unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn test_parse_http_url_root_path() {
+        let (host, port, path) = parse_http_url("http://example.com/").unwrap();
+        assert_eq!(host, "example.com");
+        assert_eq!(port, 80);
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn test_parse_http_url_complex_path() {
+        let (host, port, path) = parse_http_url("http://speed.example.com:9000/download?size=100MB&format=binary").unwrap();
+        assert_eq!(host, "speed.example.com");
+        assert_eq!(port, 9000);
+        assert_eq!(path, "/download?size=100MB&format=binary");
+    }
+
+    #[test]
+    fn test_parse_http_url_ipv4() {
+        let (host, port, path) = parse_http_url("http://192.168.1.1:8080/speedtest").unwrap();
+        assert_eq!(host, "192.168.1.1");
+        assert_eq!(port, 8080);
+        assert_eq!(path, "/speedtest");
+    }
+
+    #[test]
     fn test_parse_http_url_https_fails() {
         assert!(parse_http_url("https://example.com").is_err());
     }
 
     #[test]
+    fn test_parse_http_url_invalid() {
+        assert!(parse_http_url("ftp://example.com").is_err());
+        assert!(parse_http_url("example.com").is_err());
+        assert!(parse_http_url("http://").is_err());
+        assert!(parse_http_url("").is_err());
+    }
+
+    #[test]
+    fn test_parse_http_url_invalid_port() {
+        assert!(parse_http_url("http://example.com:abc/test").is_err());
+        assert!(parse_http_url("http://example.com:99999/test").is_err());
+        assert!(parse_http_url("http://example.com:-1/test").is_err());
+    }
+
+    #[test]
     fn test_find_header_end() {
         let buf = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nbody";
-        assert!(find_header_end(buf).is_some());
+        let pos = find_header_end(buf);
+        assert!(pos.is_some());
+        assert_eq!(pos.unwrap(), 41); // Position of first \r\n\r\n
+    }
+
+    #[test]
+    fn test_find_header_end_at_start() {
+        let buf = b"\r\n\r\nbody content";
+        let pos = find_header_end(buf);
+        assert!(pos.is_some());
+        assert_eq!(pos.unwrap(), 0);
+    }
+
+    #[test]
+    fn test_find_header_end_at_end() {
+        let buf = b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n";
+        let pos = find_header_end(buf);
+        assert!(pos.is_some());
+        assert_eq!(pos.unwrap(), 34);
     }
 
     #[test]
     fn test_find_header_end_none() {
         let buf = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain";
         assert!(find_header_end(buf).is_none());
+    }
+
+    #[test]
+    fn test_find_header_end_partial_match() {
+        let buf = b"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r";
+        assert!(find_header_end(buf).is_none());
+    }
+
+    #[test]
+    fn test_find_header_end_empty() {
+        let buf = b"";
+        assert!(find_header_end(buf).is_none());
+    }
+
+    #[test]
+    fn test_find_header_end_short() {
+        let buf = b"\r\n";
+        assert!(find_header_end(buf).is_none());
+    }
+
+    #[test]
+    fn test_speed_result_serialization() {
+        let result = SpeedResult {
+            download_mbps: Some(100.5),
+            upload_mbps: Some(50.25),
+            download_bytes: Some(10_000_000),
+            upload_bytes: Some(5_000_000),
+            download_time_ms: Some(800.0),
+            upload_time_ms: Some(800.0),
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("100.5"));
+        assert!(json.contains("50.25"));
+        assert!(json.contains("10000000"));
+    }
+
+    #[test]
+    fn test_speed_result_download_only() {
+        let result = SpeedResult {
+            download_mbps: Some(75.0),
+            upload_mbps: None,
+            download_bytes: Some(1_000_000),
+            upload_bytes: None,
+            download_time_ms: Some(107.0),
+            upload_time_ms: None,
+        };
+        assert!(result.download_mbps.is_some());
+        assert!(result.upload_mbps.is_none());
+        assert!(result.upload_bytes.is_none());
+    }
+
+    #[test]
+    fn test_speed_result_upload_only() {
+        let result = SpeedResult {
+            download_mbps: None,
+            upload_mbps: Some(25.0),
+            download_bytes: None,
+            upload_bytes: Some(500_000),
+            download_time_ms: None,
+            upload_time_ms: Some(160.0),
+        };
+        assert!(result.download_mbps.is_none());
+        assert!(result.upload_mbps.is_some());
+        assert!(result.download_bytes.is_none());
+    }
+
+    #[test]
+    fn test_speed_result_no_data() {
+        let result = SpeedResult {
+            download_mbps: None,
+            upload_mbps: None,
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        assert!(result.download_mbps.is_none());
+        assert!(result.upload_mbps.is_none());
     }
 }
