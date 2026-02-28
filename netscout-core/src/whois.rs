@@ -213,7 +213,10 @@ mod tests {
 
     #[test]
     fn test_whois_server_subdomain() {
-        assert_eq!(whois_server_for("www.example.com"), "whois.verisign-grs.com");
+        assert_eq!(
+            whois_server_for("www.example.com"),
+            "whois.verisign-grs.com"
+        );
         assert_eq!(whois_server_for("api.test.org"), "whois.pir.org");
         assert_eq!(whois_server_for("sub.domain.xyz"), "whois.nic.xyz");
     }
@@ -319,7 +322,8 @@ mod tests {
 
     #[test]
     fn test_extract_all_multiple_keys() {
-        let text = "Name Server: ns1.example.com\nnserver: ns2.example.com\nnameserver: ns3.example.com\n";
+        let text =
+            "Name Server: ns1.example.com\nnserver: ns2.example.com\nnameserver: ns3.example.com\n";
         let ns = extract_all(text, &["Name Server", "nserver", "nameserver"]);
         assert_eq!(ns.len(), 3);
     }
@@ -353,8 +357,14 @@ mod tests {
             creation_date: Some("1995-08-14T04:00:00Z".to_string()),
             expiry_date: Some("2025-08-13T04:00:00Z".to_string()),
             updated_date: Some("2021-08-14T07:01:44Z".to_string()),
-            nameservers: vec!["a.iana-servers.net".to_string(), "b.iana-servers.net".to_string()],
-            status: vec!["clientDeleteProhibited".to_string(), "clientTransferProhibited".to_string()],
+            nameservers: vec![
+                "a.iana-servers.net".to_string(),
+                "b.iana-servers.net".to_string(),
+            ],
+            status: vec![
+                "clientDeleteProhibited".to_string(),
+                "clientTransferProhibited".to_string(),
+            ],
             raw: "Raw WHOIS data here...".to_string(),
             query_time_ms: 1250.5,
         };
@@ -379,7 +389,7 @@ mod tests {
             raw: "No match for domain".to_string(),
             query_time_ms: 500.0,
         };
-        
+
         assert!(result.registrar.is_none());
         assert!(result.creation_date.is_none());
         assert!(result.nameservers.is_empty());

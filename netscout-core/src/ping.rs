@@ -218,7 +218,7 @@ mod tests {
         let start = std::time::Instant::now();
         let (success, rtt) = tcp_ping(addr, Duration::from_millis(50)).await;
         let elapsed = start.elapsed();
-        
+
         assert!(!success);
         assert!(rtt.is_none());
         // Should timeout quickly
@@ -256,7 +256,7 @@ mod tests {
         let rtts: Vec<f64> = probes.iter().filter_map(|p| p.rtt_ms).collect();
         let avg = rtts.iter().sum::<f64>() / rtts.len() as f64;
         assert!((avg - 20.0).abs() < f64::EPSILON);
-        
+
         let min = rtts.iter().cloned().reduce(f64::min).unwrap();
         let max = rtts.iter().cloned().reduce(f64::max).unwrap();
         assert_eq!(min, 10.0);
@@ -338,7 +338,7 @@ mod tests {
         let rtts = vec![10.0_f64, 15.0, 12.0, 18.0];
         let diffs: Vec<f64> = rtts.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
         let jitter = diffs.iter().sum::<f64>() / diffs.len() as f64;
-        
+
         // Expected: |15-10| + |12-15| + |18-12| = 5 + 3 + 6 = 14, avg = 14/3 = 4.67
         let expected = 14.0 / 3.0;
         assert!((jitter - expected).abs() < 0.01);
@@ -350,11 +350,11 @@ mod tests {
         let avg = rtts.iter().sum::<f64>() / rtts.len() as f64; // 20.0
         let variance = rtts.iter().map(|r| (r - avg).powi(2)).sum::<f64>() / rtts.len() as f64;
         let stddev = variance.sqrt();
-        
+
         // Variance = ((10-20)² + (20-20)² + (30-20)²) / 3 = (100 + 0 + 100) / 3 = 66.67
         // Stddev = sqrt(66.67) ≈ 8.16
-        assert!((variance - 200.0/3.0).abs() < 0.01);
-        assert!((stddev - (200.0/3.0_f64).sqrt()).abs() < 0.01);
+        assert!((variance - 200.0 / 3.0).abs() < 0.01);
+        assert!((stddev - (200.0 / 3.0_f64).sqrt()).abs() < 0.01);
     }
 
     #[tokio::test]

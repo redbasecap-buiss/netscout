@@ -848,14 +848,14 @@ mod tests {
     #[test]
     fn test_format_output_json() {
         use crate::dns::{DnsRecord, DnsResult};
-        
+
         let record = DnsRecord {
             name: "example.com".to_string(),
             record_type: "A".to_string(),
             ttl: 300,
             value: "93.184.216.34".to_string(),
         };
-        
+
         let result = DnsResult {
             domain: "example.com".to_string(),
             resolver: "8.8.8.8".to_string(),
@@ -867,7 +867,7 @@ mod tests {
             recursion_available: true,
             authenticated_data: false,
         };
-        
+
         let output = format_output(&result, OutputFormat::Json);
         assert!(output.contains("example.com"));
         assert!(output.contains("93.184.216.34"));
@@ -877,18 +877,16 @@ mod tests {
     #[test]
     fn test_format_output_human() {
         use crate::ping::{PingProbe, PingStats};
-        
+
         let stats = PingStats {
             target: "example.com".to_string(),
             resolved_addr: "93.184.216.34".to_string(),
-            probes: vec![
-                PingProbe {
-                    seq: 0,
-                    success: true,
-                    rtt_ms: Some(25.0),
-                    addr: "93.184.216.34".to_string(),
-                }
-            ],
+            probes: vec![PingProbe {
+                seq: 0,
+                success: true,
+                rtt_ms: Some(25.0),
+                addr: "93.184.216.34".to_string(),
+            }],
             sent: 1,
             received: 1,
             lost: 0,
@@ -899,7 +897,7 @@ mod tests {
             stddev_ms: Some(0.0),
             jitter_ms: None,
         };
-        
+
         let output = format_output(&stats, OutputFormat::Human);
         assert!(output.contains("PING"));
         assert!(output.contains("example.com"));
@@ -909,23 +907,21 @@ mod tests {
     #[test]
     fn test_format_output_table() {
         use crate::port::{PortResult, ScanResult};
-        
+
         let result = ScanResult {
             target: "example.com".to_string(),
             resolved_addr: "93.184.216.34".to_string(),
-            ports: vec![
-                PortResult {
-                    port: 80,
-                    open: true,
-                    service: Some("http".to_string()),
-                    rtt_ms: Some(10.0),
-                }
-            ],
+            ports: vec![PortResult {
+                port: 80,
+                open: true,
+                service: Some("http".to_string()),
+                rtt_ms: Some(10.0),
+            }],
             open_count: 1,
             closed_count: 0,
             scan_time_ms: 100.0,
         };
-        
+
         let output = format_output(&result, OutputFormat::Table);
         assert!(output.contains("PORT"));
         assert!(output.contains("PROTO"));
@@ -937,26 +933,24 @@ mod tests {
     #[test]
     fn test_format_output_csv() {
         use crate::dns::{DnsRecord, DnsResult};
-        
+
         let result = DnsResult {
             domain: "example.com".to_string(),
             resolver: "8.8.8.8".to_string(),
             record_type: "A".to_string(),
-            records: vec![
-                DnsRecord {
-                    name: "example.com".to_string(),
-                    record_type: "A".to_string(),
-                    ttl: 300,
-                    value: "93.184.216.34".to_string(),
-                }
-            ],
+            records: vec![DnsRecord {
+                name: "example.com".to_string(),
+                record_type: "A".to_string(),
+                ttl: 300,
+                value: "93.184.216.34".to_string(),
+            }],
             query_time_ms: 25.0,
             response_code: "NOERROR".to_string(),
             truncated: false,
             recursion_available: true,
             authenticated_data: false,
         };
-        
+
         let output = format_output(&result, OutputFormat::Csv);
         assert!(output.contains("type,name,ttl,value"));
         assert!(output.contains("A,example.com,300,93.184.216.34"));

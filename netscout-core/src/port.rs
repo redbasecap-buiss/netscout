@@ -322,7 +322,11 @@ mod tests {
         let mut sorted_ports = ports.clone();
         sorted_ports.sort_unstable();
         sorted_ports.dedup();
-        assert_eq!(ports.len(), sorted_ports.len(), "Top ports should not contain duplicates");
+        assert_eq!(
+            ports.len(),
+            sorted_ports.len(),
+            "Top ports should not contain duplicates"
+        );
     }
 
     #[test]
@@ -443,7 +447,7 @@ mod tests {
             closed_count: 8,
             scan_time_ms: 500.0,
         };
-        
+
         assert_eq!(result.ports.len(), 2);
         assert_eq!(result.open_count, 2);
         assert_eq!(result.closed_count, 8);

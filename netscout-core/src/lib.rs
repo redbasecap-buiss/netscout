@@ -1,4 +1,5 @@
 pub mod cert;
+pub mod config;
 pub mod dns;
 pub mod http;
 pub mod netif;
@@ -11,8 +12,9 @@ pub mod trace;
 pub mod whois;
 
 /// Output format for all commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OutputFormat {
+    #[default]
     Human,
     Json,
     Table,
@@ -41,7 +43,7 @@ impl OutputFormat {
     }
 
     /// Parse a format from a string.
-    pub fn from_str(s: &str) -> Option<OutputFormat> {
+    pub fn parse(s: &str) -> Option<OutputFormat> {
         match s.to_lowercase().as_str() {
             "human" | "h" => Some(OutputFormat::Human),
             "json" | "j" => Some(OutputFormat::Json),
@@ -65,12 +67,6 @@ impl OutputFormat {
 impl std::fmt::Display for OutputFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
-    }
-}
-
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::Human
     }
 }
 
@@ -144,34 +140,34 @@ mod tests {
 
     #[test]
     fn test_output_format_from_str() {
-        assert_eq!(OutputFormat::from_str("human"), Some(OutputFormat::Human));
-        assert_eq!(OutputFormat::from_str("json"), Some(OutputFormat::Json));
-        assert_eq!(OutputFormat::from_str("table"), Some(OutputFormat::Table));
-        assert_eq!(OutputFormat::from_str("csv"), Some(OutputFormat::Csv));
+        assert_eq!(OutputFormat::parse("human"), Some(OutputFormat::Human));
+        assert_eq!(OutputFormat::parse("json"), Some(OutputFormat::Json));
+        assert_eq!(OutputFormat::parse("table"), Some(OutputFormat::Table));
+        assert_eq!(OutputFormat::parse("csv"), Some(OutputFormat::Csv));
     }
 
     #[test]
     fn test_output_format_from_str_case_insensitive() {
-        assert_eq!(OutputFormat::from_str("HUMAN"), Some(OutputFormat::Human));
-        assert_eq!(OutputFormat::from_str("JSON"), Some(OutputFormat::Json));
-        assert_eq!(OutputFormat::from_str("Table"), Some(OutputFormat::Table));
-        assert_eq!(OutputFormat::from_str("CSV"), Some(OutputFormat::Csv));
+        assert_eq!(OutputFormat::parse("HUMAN"), Some(OutputFormat::Human));
+        assert_eq!(OutputFormat::parse("JSON"), Some(OutputFormat::Json));
+        assert_eq!(OutputFormat::parse("Table"), Some(OutputFormat::Table));
+        assert_eq!(OutputFormat::parse("CSV"), Some(OutputFormat::Csv));
     }
 
     #[test]
     fn test_output_format_from_str_short_forms() {
-        assert_eq!(OutputFormat::from_str("h"), Some(OutputFormat::Human));
-        assert_eq!(OutputFormat::from_str("j"), Some(OutputFormat::Json));
-        assert_eq!(OutputFormat::from_str("t"), Some(OutputFormat::Table));
-        assert_eq!(OutputFormat::from_str("c"), Some(OutputFormat::Csv));
+        assert_eq!(OutputFormat::parse("h"), Some(OutputFormat::Human));
+        assert_eq!(OutputFormat::parse("j"), Some(OutputFormat::Json));
+        assert_eq!(OutputFormat::parse("t"), Some(OutputFormat::Table));
+        assert_eq!(OutputFormat::parse("c"), Some(OutputFormat::Csv));
     }
 
     #[test]
     fn test_output_format_from_str_invalid() {
-        assert_eq!(OutputFormat::from_str("invalid"), None);
-        assert_eq!(OutputFormat::from_str("xml"), None);
-        assert_eq!(OutputFormat::from_str(""), None);
-        assert_eq!(OutputFormat::from_str("yaml"), None);
+        assert_eq!(OutputFormat::parse("invalid"), None);
+        assert_eq!(OutputFormat::parse("xml"), None);
+        assert_eq!(OutputFormat::parse(""), None);
+        assert_eq!(OutputFormat::parse("yaml"), None);
     }
 
     #[test]
@@ -219,7 +215,7 @@ mod tests {
         let format = OutputFormat::Json;
         match format {
             OutputFormat::Human => panic!("Should not match Human"),
-            OutputFormat::Json => {}, // Expected
+            OutputFormat::Json => {} // Expected
             OutputFormat::Table => panic!("Should not match Table"),
             OutputFormat::Csv => panic!("Should not match Csv"),
         }
@@ -230,7 +226,7 @@ mod tests {
         let formats = OutputFormat::all();
         for format in formats {
             let str_repr = format.as_str();
-            let parsed = OutputFormat::from_str(str_repr);
+            let parsed = OutputFormat::parse(str_repr);
             assert_eq!(parsed, Some(format));
         }
     }
@@ -244,7 +240,7 @@ mod tests {
         set.insert(OutputFormat::Table);
         set.insert(OutputFormat::Csv);
         assert_eq!(set.len(), 4);
-        
+
         // Test that inserting the same format doesn't increase size
         set.insert(OutputFormat::Human);
         assert_eq!(set.len(), 4);
@@ -278,7 +274,12 @@ mod tests {
         ];
 
         for (input, expected) in test_cases {
-            assert_eq!(OutputFormat::from_str(input), expected, "Failed for input: '{}'", input);
+            assert_eq!(
+                OutputFormat::parse(input),
+                expected,
+                "Failed for input: '{}'",
+                input
+            );
         }
     }
 
@@ -287,10 +288,10 @@ mod tests {
         let all = OutputFormat::all();
         let structured_count = all.iter().filter(|f| f.is_structured()).count();
         let human_readable_count = all.iter().filter(|f| f.is_human_readable()).count();
-        
+
         assert_eq!(structured_count, 2); // Json and Csv
         assert_eq!(human_readable_count, 2); // Human and Table
-        
+
         // Each format should be either structured or human-readable (but not necessarily both)
         for format in all {
             // This is not a requirement, just documenting current behavior

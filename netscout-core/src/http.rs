@@ -316,7 +316,8 @@ mod tests {
 
     #[test]
     fn test_parse_url_with_query() {
-        let (tls, host, port, path) = parse_url("http://example.com/search?q=test&limit=10").unwrap();
+        let (tls, host, port, path) =
+            parse_url("http://example.com/search?q=test&limit=10").unwrap();
         assert!(!tls);
         assert_eq!(host, "example.com");
         assert_eq!(port, 80);
@@ -380,7 +381,8 @@ mod tests {
 
     #[test]
     fn test_parse_response_case_insensitive_headers() {
-        let resp = "HTTP/1.1 200 OK\r\nContent-TYPE: application/json\r\nX-CUSTOM-Header: value\r\n\r\n{}";
+        let resp =
+            "HTTP/1.1 200 OK\r\nContent-TYPE: application/json\r\nX-CUSTOM-Header: value\r\n\r\n{}";
         let (status, _text, headers, body_size) = parse_response(resp).unwrap();
         assert_eq!(status, 200);
         assert_eq!(headers.get("content-type").unwrap(), "application/json");

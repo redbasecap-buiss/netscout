@@ -249,7 +249,7 @@ mod tests {
         let cert_data = vec![0x30, 0x82, 0x05, 0x10]; // Basic ASN.1 structure
         let cert_data = [cert_data, vec![0u8; 100]].concat(); // Add padding
         let info = parse_basic_cert_info(&cert_data);
-        
+
         assert_eq!(info.subject, "unknown");
         assert_eq!(info.issuer, "unknown");
         assert_eq!(info.not_before, "see raw certificate");
@@ -392,7 +392,7 @@ mod tests {
                 is_ca: true,
             },
         ];
-        
+
         let result = CertResult {
             host: "example.com".into(),
             port: 443,
@@ -402,11 +402,11 @@ mod tests {
             connection_time_ms: 35.0,
             warning: None,
         };
-        
+
         assert_eq!(result.certificate_chain.len(), 3);
         assert!(!result.certificate_chain[0].is_ca); // Leaf cert
-        assert!(result.certificate_chain[1].is_ca);  // Intermediate
-        assert!(result.certificate_chain[2].is_ca);  // Root
+        assert!(result.certificate_chain[1].is_ca); // Intermediate
+        assert!(result.certificate_chain[2].is_ca); // Root
     }
 
     #[test]

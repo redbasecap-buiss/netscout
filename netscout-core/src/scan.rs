@@ -334,7 +334,7 @@ mod tests {
             hosts_found: 2,
             scan_time_ms: 3500.0,
         };
-        
+
         assert_eq!(result.hosts.len(), 2);
         assert_eq!(result.hosts_found, 2);
         assert_eq!(result.hosts[0].ip, "192.168.1.1");

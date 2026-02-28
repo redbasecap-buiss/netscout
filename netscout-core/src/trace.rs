@@ -335,7 +335,7 @@ mod tests {
             rtt_ms: Some(45.123),
             timed_out: false,
         };
-        
+
         // Test various properties
         assert_eq!(hop.hop, 10);
         assert_eq!(hop.addr.as_ref().unwrap(), "203.0.113.1");
@@ -349,18 +349,16 @@ mod tests {
         let result = TraceResult {
             target: "example.com".into(),
             resolved_addr: "93.184.216.34".into(),
-            hops: vec![
-                TraceHop {
-                    hop: 1,
-                    addr: Some("93.184.216.34".into()),
-                    hostname: Some("example.com".into()),
-                    rtt_ms: Some(25.0),
-                    timed_out: false,
-                }
-            ],
+            hops: vec![TraceHop {
+                hop: 1,
+                addr: Some("93.184.216.34".into()),
+                hostname: Some("example.com".into()),
+                rtt_ms: Some(25.0),
+                timed_out: false,
+            }],
             reached: true,
         };
-        
+
         assert!(result.reached);
         assert_eq!(result.hops.len(), 1);
         assert_eq!(result.target, "example.com");

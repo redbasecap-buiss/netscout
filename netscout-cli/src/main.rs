@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
+use netscout_core::config::{self, Config};
 use netscout_core::output::format_output;
 use netscout_core::OutputFormat;
 use std::time::Duration;
@@ -34,6 +35,10 @@ struct Cli {
     /// Enable verbose output
     #[arg(long, short, global = true)]
     verbose: bool,
+
+    /// Path to config file (default: ~/.netscout.toml)
+    #[arg(long, global = true)]
+    config: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -43,28 +48,28 @@ enum Commands {
         /// Target hostname or IP
         target: String,
         /// Number of pings to send
-        #[arg(short, long, default_value = "4")]
-        count: u32,
+        #[arg(short, long)]
+        count: Option<u32>,
         /// Interval between pings in milliseconds
-        #[arg(short, long, default_value = "1000")]
-        interval: u64,
+        #[arg(short, long)]
+        interval: Option<u64>,
         /// Timeout per ping in milliseconds
-        #[arg(short, long, default_value = "2000")]
-        timeout: u64,
-        /// TCP port to ping (default: 80)
-        #[arg(short, long, default_value = "80")]
-        port: u16,
+        #[arg(short, long)]
+        timeout: Option<u64>,
+        /// TCP port to ping
+        #[arg(short, long)]
+        port: Option<u16>,
     },
     /// Query DNS records
     Dns {
         /// Domain to query
         domain: String,
         /// Record type (A, AAAA, MX, TXT, CNAME, NS, SOA, PTR)
-        #[arg(short = 't', long = "type", default_value = "A")]
-        record_type: String,
+        #[arg(short = 't', long = "type")]
+        record_type: Option<String>,
         /// DNS resolver IP
-        #[arg(short, long, default_value = "8.8.8.8")]
-        resolver: String,
+        #[arg(short, long)]
+        resolver: Option<String>,
     },
     /// Scan TCP ports on a target
     Port {
@@ -74,30 +79,30 @@ enum Commands {
         #[arg(short, long)]
         ports: Option<String>,
         /// Timeout per connection in milliseconds
-        #[arg(short, long, default_value = "2000")]
-        timeout: u64,
+        #[arg(short, long)]
+        timeout: Option<u64>,
         /// Number of parallel connections
-        #[arg(long, default_value = "100")]
-        parallel: usize,
+        #[arg(long)]
+        parallel: Option<usize>,
     },
     /// Traceroute to a target
     Trace {
         /// Target hostname or IP
         target: String,
         /// Maximum number of hops
-        #[arg(long, default_value = "30")]
-        max_hops: u8,
+        #[arg(long)]
+        max_hops: Option<u8>,
         /// Timeout per hop in milliseconds
-        #[arg(short, long, default_value = "2000")]
-        timeout: u64,
+        #[arg(short, long)]
+        timeout: Option<u64>,
     },
     /// Probe an HTTP(S) URL
     Http {
         /// URL to probe
         url: String,
         /// HTTP method
-        #[arg(short, long, default_value = "GET")]
-        method: String,
+        #[arg(short, long)]
+        method: Option<String>,
         /// Extra headers (K:V format, repeatable)
         #[arg(short = 'H', long = "header")]
         headers: Vec<String>,
@@ -110,8 +115,8 @@ enum Commands {
         /// Hostname to inspect
         host: String,
         /// Port number
-        #[arg(short, long, default_value = "443")]
-        port: u16,
+        #[arg(short, long)]
+        port: Option<u16>,
     },
     /// Run a bandwidth speed test
     Speed {
@@ -144,18 +149,20 @@ enum Commands {
         #[arg(short, long)]
         ports: Option<String>,
         /// Timeout per connection in milliseconds
-        #[arg(short, long, default_value = "500")]
-        timeout: u64,
+        #[arg(short, long)]
+        timeout: Option<u64>,
     },
 }
 
-fn get_format(cli: &Cli) -> OutputFormat {
+fn get_format(cli: &Cli, cfg: &Config) -> OutputFormat {
     if cli.json {
         OutputFormat::Json
     } else if cli.csv {
         OutputFormat::Csv
     } else if cli.table {
         OutputFormat::Table
+    } else if let Some(ref fmt) = cfg.defaults.output {
+        OutputFormat::parse(fmt).unwrap_or(OutputFormat::Human)
     } else {
         OutputFormat::Human
     }
@@ -165,11 +172,17 @@ fn get_format(cli: &Cli) -> OutputFormat {
 async fn main() -> Result<(), String> {
     let cli = Cli::parse();
 
-    if cli.no_color {
+    let cfg = match &cli.config {
+        Some(path) => config::load_config_from(Some(path.into()))?,
+        None => config::load_config()?,
+    };
+
+    let no_color = cli.no_color || cfg.defaults.no_color.unwrap_or(false);
+    if no_color {
         colored::control::set_override(false);
     }
 
-    let format = get_format(&cli);
+    let format = get_format(&cli, &cfg);
 
     let result: Result<String, String> = match cli.command {
         Commands::Ping {
@@ -181,10 +194,10 @@ async fn main() -> Result<(), String> {
         } => {
             let config = netscout_core::ping::PingConfig {
                 target,
-                count,
-                interval: Duration::from_millis(interval),
-                timeout: Duration::from_millis(timeout),
-                port,
+                count: count.or(cfg.ping.count).unwrap_or(4),
+                interval: Duration::from_millis(interval.or(cfg.ping.interval).unwrap_or(1000)),
+                timeout: Duration::from_millis(timeout.or(cfg.ping.timeout).unwrap_or(2000)),
+                port: port.or(cfg.ping.port).unwrap_or(80),
             };
             netscout_core::ping::ping(&config)
                 .await
@@ -195,12 +208,17 @@ async fn main() -> Result<(), String> {
             record_type,
             resolver,
         } => {
-            let rt = netscout_core::dns::RecordType::from_str_loose(&record_type)
-                .ok_or_else(|| format!("Unknown record type: {record_type}"))?;
+            let rt_str = record_type
+                .or(cfg.dns.record_type.clone())
+                .unwrap_or_else(|| "A".to_string());
+            let rt = netscout_core::dns::RecordType::from_str_loose(&rt_str)
+                .ok_or_else(|| format!("Unknown record type: {rt_str}"))?;
             let config = netscout_core::dns::DnsConfig {
                 domain,
                 record_type: rt,
-                resolver,
+                resolver: resolver
+                    .or(cfg.dns.resolver.clone())
+                    .unwrap_or_else(|| "8.8.8.8".to_string()),
                 ..Default::default()
             };
             netscout_core::dns::query(&config).map(|r| format_output(&r, format))
@@ -218,8 +236,8 @@ async fn main() -> Result<(), String> {
             let config = netscout_core::port::PortConfig {
                 target,
                 ports: port_list,
-                timeout: Duration::from_millis(timeout),
-                parallel,
+                timeout: Duration::from_millis(timeout.or(cfg.port.timeout).unwrap_or(2000)),
+                parallel: parallel.or(cfg.port.parallel).unwrap_or(100),
             };
             netscout_core::port::scan(&config)
                 .await
@@ -232,8 +250,8 @@ async fn main() -> Result<(), String> {
         } => {
             let config = netscout_core::trace::TraceConfig {
                 target,
-                max_hops,
-                timeout: Duration::from_millis(timeout),
+                max_hops: max_hops.or(cfg.trace.max_hops).unwrap_or(30),
+                timeout: Duration::from_millis(timeout.or(cfg.trace.timeout).unwrap_or(2000)),
                 ..Default::default()
             };
             netscout_core::trace::trace(&config)
@@ -255,9 +273,11 @@ async fn main() -> Result<(), String> {
                 .collect();
             let config = netscout_core::http::HttpConfig {
                 url,
-                method,
+                method: method
+                    .or(cfg.http.method.clone())
+                    .unwrap_or_else(|| "GET".to_string()),
                 headers: parsed_headers,
-                follow_redirects: follow,
+                follow_redirects: follow || cfg.http.follow.unwrap_or(false),
                 ..Default::default()
             };
             netscout_core::http::probe(&config).map(|r| format_output(&r, format))
@@ -265,7 +285,7 @@ async fn main() -> Result<(), String> {
         Commands::Cert { host, port } => {
             let config = netscout_core::cert::CertConfig {
                 host,
-                port,
+                port: port.or(cfg.cert.port).unwrap_or(443),
                 ..Default::default()
             };
             netscout_core::cert::inspect(&config).map(|r| format_output(&r, format))
@@ -311,7 +331,7 @@ async fn main() -> Result<(), String> {
             let config = netscout_core::scan::LanScanConfig {
                 subnet,
                 ports: port_list,
-                timeout: Duration::from_millis(timeout),
+                timeout: Duration::from_millis(timeout.or(cfg.scan.timeout).unwrap_or(500)),
                 ..Default::default()
             };
             netscout_core::scan::scan(&config)

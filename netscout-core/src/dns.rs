@@ -517,8 +517,10 @@ mod tests {
 
     #[test]
     fn test_parse_rdata_aaaa_record() {
-        let buf = [0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
-                   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+        let buf = [
+            0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01,
+        ];
         let mut offset = 0;
         let result = parse_rdata(&buf, &mut offset, 16, 28);
         assert_eq!(result, "2001:db8:0:0:0:0:0:1");
@@ -536,7 +538,9 @@ mod tests {
 
     #[test]
     fn test_parse_rdata_txt_record() {
-        let buf = [0x05, b'h', b'e', b'l', b'l', b'o', 0x05, b'w', b'o', b'r', b'l', b'd'];
+        let buf = [
+            0x05, b'h', b'e', b'l', b'l', b'o', 0x05, b'w', b'o', b'r', b'l', b'd',
+        ];
         let mut offset = 0;
         let result = parse_rdata(&buf, &mut offset, 12, 16);
         assert_eq!(result, "hello world");

@@ -13,6 +13,8 @@ colored = "2"
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 webpki-roots = "0.26"
 thiserror = "2"
+toml = "0.8"
+dirs = "6"
 libc = "0.2"
 
 [dev-dependencies]

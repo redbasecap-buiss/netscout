@@ -210,7 +210,9 @@ mod tests {
 
     #[test]
     fn test_parse_http_url_complex_path() {
-        let (host, port, path) = parse_http_url("http://speed.example.com:9000/download?size=100MB&format=binary").unwrap();
+        let (host, port, path) =
+            parse_http_url("http://speed.example.com:9000/download?size=100MB&format=binary")
+                .unwrap();
         assert_eq!(host, "speed.example.com");
         assert_eq!(port, 9000);
         assert_eq!(path, "/download?size=100MB&format=binary");

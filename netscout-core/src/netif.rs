@@ -332,8 +332,14 @@ mod tests {
     fn test_scope_for_v4_link_local() {
         // Test link-local range (169.254.0.0/16)
         assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 0, 1)), "link-local");
-        assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 100, 200)), "link-local");
-        assert_eq!(scope_for_v4(Ipv4Addr::new(169, 254, 255, 254)), "link-local");
+        assert_eq!(
+            scope_for_v4(Ipv4Addr::new(169, 254, 100, 200)),
+            "link-local"
+        );
+        assert_eq!(
+            scope_for_v4(Ipv4Addr::new(169, 254, 255, 254)),
+            "link-local"
+        );
     }
 
     #[test]
@@ -363,10 +369,19 @@ mod tests {
     #[test]
     fn test_scope_for_v6_link_local_range() {
         // Test various link-local addresses (fe80::/10)
-        assert_eq!(scope_for_v6("fe80::1234:5678:9abc:def0".parse().unwrap()), "link-local");
-        assert_eq!(scope_for_v6("fe80::dead:beef".parse().unwrap()), "link-local");
+        assert_eq!(
+            scope_for_v6("fe80::1234:5678:9abc:def0".parse().unwrap()),
+            "link-local"
+        );
+        assert_eq!(
+            scope_for_v6("fe80::dead:beef".parse().unwrap()),
+            "link-local"
+        );
         assert_eq!(scope_for_v6("feb0::1".parse().unwrap()), "link-local");
-        assert_eq!(scope_for_v6("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()), "link-local");
+        assert_eq!(
+            scope_for_v6("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()),
+            "link-local"
+        );
     }
 
     #[test]
@@ -374,14 +389,23 @@ mod tests {
         // Test unique local addresses (fc00::/7)
         assert_eq!(scope_for_v6("fc00::1".parse().unwrap()), "unique-local");
         assert_eq!(scope_for_v6("fd00::1".parse().unwrap()), "unique-local");
-        assert_eq!(scope_for_v6("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()), "unique-local");
+        assert_eq!(
+            scope_for_v6("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff".parse().unwrap()),
+            "unique-local"
+        );
     }
 
     #[test]
     fn test_scope_for_v6_global() {
         // Test various global unicast addresses
-        assert_eq!(scope_for_v6("2001:4860:4860::8888".parse().unwrap()), "global"); // Google DNS
-        assert_eq!(scope_for_v6("2606:4700:4700::1111".parse().unwrap()), "global"); // Cloudflare DNS
+        assert_eq!(
+            scope_for_v6("2001:4860:4860::8888".parse().unwrap()),
+            "global"
+        ); // Google DNS
+        assert_eq!(
+            scope_for_v6("2606:4700:4700::1111".parse().unwrap()),
+            "global"
+        ); // Cloudflare DNS
         assert_eq!(scope_for_v6("2001:db8::1".parse().unwrap()), "global"); // Documentation
     }
 
@@ -402,13 +426,13 @@ mod tests {
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         assert_eq!(count_v6_prefix(&mask_48), 48);
-        
+
         // Test /56
         let mask_56 = [
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         ];
         assert_eq!(count_v6_prefix(&mask_56), 56);
-        
+
         // Test /0 (all zeros)
         let mask_0 = [0; 16];
         assert_eq!(count_v6_prefix(&mask_0), 0);
@@ -422,7 +446,7 @@ mod tests {
             0, 0, 0, 0, 0, 0, 0, 0,
         ];
         assert_eq!(count_v6_prefix(&mask_partial), 60);
-        
+
         let mask_partial2 = [
             0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xc0, // 58 bits
             0, 0, 0, 0, 0, 0, 0, 0,
@@ -493,7 +517,7 @@ mod tests {
             result.interfaces.iter().any(|i| i.is_loopback),
             "Should have a loopback interface"
         );
-        
+
         // Verify counts match
         let actual_up_count = result.interfaces.iter().filter(|i| i.is_up).count();
         assert_eq!(result.up_count, actual_up_count);
@@ -521,7 +545,7 @@ mod tests {
             ],
             mtu: Some(65536),
         };
-        
+
         assert_eq!(interface.name, "lo");
         assert!(interface.is_loopback);
         assert!(interface.is_up);
@@ -539,7 +563,7 @@ mod tests {
             addresses: vec![],
             mtu: None,
         };
-        
+
         assert!(interface.mtu.is_none());
         assert!(!interface.is_up);
         assert!(interface.addresses.is_empty());
