@@ -173,9 +173,10 @@ mod tests {
     #[test]
     fn test_resolve_ipv6_localhost() {
         let addr = resolve("::1", 80);
-        if addr.is_ok() {
-            assert_eq!(addr.unwrap().ip().to_string(), "::1");
+        if let Ok(a) = addr {
+            assert_eq!(a.ip().to_string(), "::1");
         }
+        // IPv6 might not be available on all systems, so don't assert success
         // IPv6 might not be available on all systems, so don't assert success
     }
 
@@ -335,7 +336,7 @@ mod tests {
     #[test]
     fn test_jitter_calculation() {
         // Test jitter calculation with multiple RTT values
-        let rtts = vec![10.0_f64, 15.0, 12.0, 18.0];
+        let rtts = [10.0_f64, 15.0, 12.0, 18.0];
         let diffs: Vec<f64> = rtts.windows(2).map(|w| (w[1] - w[0]).abs()).collect();
         let jitter = diffs.iter().sum::<f64>() / diffs.len() as f64;
 
@@ -346,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_variance_calculation() {
-        let rtts = vec![10.0, 20.0, 30.0];
+        let rtts = [10.0, 20.0, 30.0];
         let avg = rtts.iter().sum::<f64>() / rtts.len() as f64; // 20.0
         let variance = rtts.iter().map(|r| (r - avg).powi(2)).sum::<f64>() / rtts.len() as f64;
         let stddev = variance.sqrt();

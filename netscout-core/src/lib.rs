@@ -1,3 +1,4 @@
+pub mod error;
 pub mod cert;
 pub mod config;
 pub mod dns;
@@ -70,6 +71,14 @@ impl std::fmt::Display for OutputFormat {
     }
 }
 
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse(s).ok_or_else(|| format!("unknown output format: '{}'", s))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -101,7 +110,7 @@ mod tests {
     #[test]
     fn test_output_format_clone() {
         let fmt = OutputFormat::Json;
-        let cloned = fmt.clone();
+        let cloned = fmt;
         assert_eq!(fmt, cloned);
     }
 
@@ -307,4 +316,16 @@ mod tests {
             assert_eq!(format.to_string(), format.as_str());
         }
     }
+
+    #[test]
+    fn test_output_format_from_str_trait() {
+        use std::str::FromStr;
+        assert_eq!(OutputFormat::from_str("json").unwrap(), OutputFormat::Json);
+        assert_eq!(OutputFormat::from_str("human").unwrap(), OutputFormat::Human);
+        assert_eq!(OutputFormat::from_str("table").unwrap(), OutputFormat::Table);
+        assert_eq!(OutputFormat::from_str("csv").unwrap(), OutputFormat::Csv);
+        assert!(OutputFormat::from_str("xml").is_err());
+        assert!(OutputFormat::from_str("").is_err());
+    }
+
 }

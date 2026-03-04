@@ -134,12 +134,63 @@ pub async fn trace(config: &TraceConfig) -> Result<TraceResult, String> {
     })
 }
 
-/// Simple reverse DNS lookup.
+/// Reverse DNS lookup via PTR query on the system resolver.
 fn dns_lookup_reverse(addr: SocketAddr) -> Option<String> {
-    // There's no stdlib reverse DNS, so we just return None for now.
-    // A full implementation would query PTR records.
-    let _ = addr;
-    None
+    // Attempt reverse lookup by resolving the IP back to a hostname.
+    // This uses the system resolver (getaddrinfo is forward-only, so we
+    // build a PTR-style query via getnameinfo).
+    #[cfg(unix)]
+    {
+        use std::ffi::CStr;
+        let (sa_ptr, sa_len): (*const libc::sockaddr, libc::socklen_t) = match addr {
+            SocketAddr::V4(ref v4) => {
+                let sin = libc::sockaddr_in {
+                    sin_family: libc::AF_INET as libc::sa_family_t,
+                    sin_port: 0,
+                    sin_addr: libc::in_addr {
+                        s_addr: u32::from(*v4.ip()).to_be(),
+                    },
+                    sin_zero: [0; 8],
+                    #[cfg(target_os = "macos")]
+                    sin_len: std::mem::size_of::<libc::sockaddr_in>() as u8,
+                };
+                let boxed = Box::new(sin);
+                let ptr = Box::into_raw(boxed) as *const libc::sockaddr;
+                (ptr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+            }
+            _ => return None,
+        };
+        let mut host_buf = [0u8; 256];
+        let ret = unsafe {
+            libc::getnameinfo(
+                sa_ptr,
+                sa_len,
+                host_buf.as_mut_ptr() as *mut libc::c_char,
+                host_buf.len() as libc::socklen_t,
+                std::ptr::null_mut(),
+                0,
+                0,
+            )
+        };
+        // Free the allocated sockaddr
+        unsafe { drop(Box::from_raw(sa_ptr as *mut libc::sockaddr_in)); }
+        if ret == 0 {
+            let cstr = unsafe { CStr::from_ptr(host_buf.as_ptr() as *const libc::c_char) };
+            let name = cstr.to_string_lossy().to_string();
+            // If getnameinfo just returned the IP string, treat as no result
+            if name == addr.ip().to_string() {
+                return None;
+            }
+            Some(name)
+        } else {
+            None
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = addr;
+        None
+    }
 }
 
 #[cfg(test)]
@@ -258,12 +309,26 @@ mod tests {
     }
 
     #[test]
-    fn test_dns_lookup_reverse_returns_none() {
+    fn test_dns_lookup_reverse_known_ip() {
         use std::net::{IpAddr, Ipv4Addr};
-        let addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 80);
+        let addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 0);
         let result = dns_lookup_reverse(addr);
-        // Current implementation always returns None
-        assert!(result.is_none());
+        // On most systems 8.8.8.8 resolves to dns.google
+        if let Some(name) = result {
+            assert!(!name.is_empty());
+        }
+        // May return None on systems without reverse DNS — both are valid
+    }
+
+    #[test]
+    fn test_dns_lookup_reverse_localhost() {
+        use std::net::{IpAddr, Ipv4Addr};
+        let addr = std::net::SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let result = dns_lookup_reverse(addr);
+        // localhost should resolve to something like "localhost"
+        if let Some(name) = result {
+            assert!(!name.is_empty());
+        }
     }
 
     #[tokio::test]
