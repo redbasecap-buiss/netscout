@@ -37,6 +37,24 @@ pub enum NetscoutError {
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, NetscoutError>;
 
+
+impl NetscoutError {
+    /// Returns `true` if this is a timeout error.
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Timeout(_))
+    }
+
+    /// Returns `true` if this is a network-related error (DNS, connection, or timeout).
+    pub fn is_network(&self) -> bool {
+        matches!(self, Self::Dns(_) | Self::Connection(_) | Self::Timeout(_))
+    }
+
+    /// Returns `true` if this is caused by invalid user input.
+    pub fn is_user_error(&self) -> bool {
+        matches!(self, Self::InvalidInput(_) | Self::Config(_))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +106,31 @@ mod tests {
     fn test_error_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<NetscoutError>();
+    
+    #[test]
+    fn test_is_timeout() {
+        assert!(NetscoutError::Timeout("elapsed".into()).is_timeout());
+        assert!(!NetscoutError::Dns("fail".into()).is_timeout());
+        assert!(!NetscoutError::Connection("refused".into()).is_timeout());
     }
+
+    #[test]
+    fn test_is_network() {
+        assert!(NetscoutError::Dns("NXDOMAIN".into()).is_network());
+        assert!(NetscoutError::Connection("refused".into()).is_network());
+        assert!(NetscoutError::Timeout("5s".into()).is_network());
+        assert!(!NetscoutError::InvalidInput("bad".into()).is_network());
+        assert!(!NetscoutError::Tls("fail".into()).is_network());
+        assert!(!NetscoutError::Config("bad toml".into()).is_network());
+    }
+
+    #[test]
+    fn test_is_user_error() {
+        assert!(NetscoutError::InvalidInput("bad port".into()).is_user_error());
+        assert!(NetscoutError::Config("parse fail".into()).is_user_error());
+        assert!(!NetscoutError::Dns("fail".into()).is_user_error());
+        assert!(!NetscoutError::Timeout("5s".into()).is_user_error());
+    }
+
+}
 }
