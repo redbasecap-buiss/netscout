@@ -106,6 +106,7 @@ mod tests {
     fn test_error_is_send_sync() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<NetscoutError>();
+    }
     
     #[test]
     fn test_is_timeout() {
@@ -132,5 +133,4 @@ mod tests {
         assert!(!NetscoutError::Timeout("5s".into()).is_user_error());
     }
 
-}
 }
