@@ -36,6 +36,44 @@ pub struct SpeedResult {
     pub upload_time_ms: Option<f64>,
 }
 
+
+impl SpeedResult {
+    /// Returns `true` if both download and upload measurements are present.
+    pub fn is_complete(&self) -> bool {
+        self.download_mbps.is_some() && self.upload_mbps.is_some()
+    }
+
+    /// Returns the download speed formatted as a human-readable string (e.g. "100.50 Mbps").
+    pub fn download_display(&self) -> String {
+        match self.download_mbps {
+            Some(mbps) => format!("{:.2} Mbps", mbps),
+            None => "N/A".to_string(),
+        }
+    }
+
+    /// Returns the upload speed formatted as a human-readable string (e.g. "50.25 Mbps").
+    pub fn upload_display(&self) -> String {
+        match self.upload_mbps {
+            Some(mbps) => format!("{:.2} Mbps", mbps),
+            None => "N/A".to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for SpeedResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Download: {} | Upload: {}", self.download_display(), self.upload_display())?;
+        if let (Some(dl_ms), Some(ul_ms)) = (self.download_time_ms, self.upload_time_ms) {
+            write!(f, " (dl {:.0}ms, ul {:.0}ms)", dl_ms, ul_ms)?;
+        } else if let Some(dl_ms) = self.download_time_ms {
+            write!(f, " (dl {:.0}ms)", dl_ms)?;
+        } else if let Some(ul_ms) = self.upload_time_ms {
+            write!(f, " (ul {:.0}ms)", ul_ms)?;
+        }
+        Ok(())
+    }
+}
+
 /// Parse URL into (host, port, path).
 fn parse_http_url(url: &str) -> Result<(String, u16, String), String> {
     let rest = url
@@ -353,4 +391,133 @@ mod tests {
         assert!(result.download_mbps.is_none());
         assert!(result.upload_mbps.is_none());
     }
+
+    #[test]
+    fn test_speed_result_is_complete() {
+        let complete = SpeedResult {
+            download_mbps: Some(100.0),
+            upload_mbps: Some(50.0),
+            download_bytes: Some(10_000_000),
+            upload_bytes: Some(5_000_000),
+            download_time_ms: Some(800.0),
+            upload_time_ms: Some(800.0),
+        };
+        assert!(complete.is_complete());
+    }
+
+    #[test]
+    fn test_speed_result_is_not_complete() {
+        let download_only = SpeedResult {
+            download_mbps: Some(100.0),
+            upload_mbps: None,
+            download_bytes: Some(10_000_000),
+            upload_bytes: None,
+            download_time_ms: Some(800.0),
+            upload_time_ms: None,
+        };
+        assert!(!download_only.is_complete());
+
+        let upload_only = SpeedResult {
+            download_mbps: None,
+            upload_mbps: Some(50.0),
+            download_bytes: None,
+            upload_bytes: Some(5_000_000),
+            download_time_ms: None,
+            upload_time_ms: Some(800.0),
+        };
+        assert!(!upload_only.is_complete());
+
+        let empty = SpeedResult {
+            download_mbps: None,
+            upload_mbps: None,
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        assert!(!empty.is_complete());
+    }
+
+    #[test]
+    fn test_speed_result_download_display() {
+        let result = SpeedResult {
+            download_mbps: Some(123.456),
+            upload_mbps: None,
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        assert_eq!(result.download_display(), "123.46 Mbps");
+    }
+
+    #[test]
+    fn test_speed_result_upload_display() {
+        let result = SpeedResult {
+            download_mbps: None,
+            upload_mbps: Some(45.6),
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        assert_eq!(result.upload_display(), "45.60 Mbps");
+    }
+
+    #[test]
+    fn test_speed_result_display_na() {
+        let result = SpeedResult {
+            download_mbps: None,
+            upload_mbps: None,
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        assert_eq!(result.download_display(), "N/A");
+        assert_eq!(result.upload_display(), "N/A");
+    }
+
+    #[test]
+    fn test_speed_result_display_full() {
+        let result = SpeedResult {
+            download_mbps: Some(100.5),
+            upload_mbps: Some(50.25),
+            download_bytes: Some(10_000_000),
+            upload_bytes: Some(5_000_000),
+            download_time_ms: Some(800.0),
+            upload_time_ms: Some(795.0),
+        };
+        let display = format!("{}", result);
+        assert_eq!(display, "Download: 100.50 Mbps | Upload: 50.25 Mbps (dl 800ms, ul 795ms)");
+    }
+
+    #[test]
+    fn test_speed_result_display_download_only() {
+        let result = SpeedResult {
+            download_mbps: Some(75.0),
+            upload_mbps: None,
+            download_bytes: Some(1_000_000),
+            upload_bytes: None,
+            download_time_ms: Some(107.0),
+            upload_time_ms: None,
+        };
+        let display = format!("{}", result);
+        assert_eq!(display, "Download: 75.00 Mbps | Upload: N/A (dl 107ms)");
+    }
+
+    #[test]
+    fn test_speed_result_display_no_times() {
+        let result = SpeedResult {
+            download_mbps: Some(100.0),
+            upload_mbps: Some(50.0),
+            download_bytes: None,
+            upload_bytes: None,
+            download_time_ms: None,
+            upload_time_ms: None,
+        };
+        let display = format!("{}", result);
+        assert_eq!(display, "Download: 100.00 Mbps | Upload: 50.00 Mbps");
+    }
+
 }
