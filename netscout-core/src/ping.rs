@@ -52,6 +52,92 @@ pub struct PingStats {
     pub jitter_ms: Option<f64>,
 }
 
+impl PingStats {
+    /// Returns true if all probes were successful.
+    pub fn is_all_success(&self) -> bool {
+        self.lost == 0 && self.sent > 0
+    }
+
+    /// Returns true if all probes failed.
+    pub fn is_all_failed(&self) -> bool {
+        self.received == 0
+    }
+
+    /// Returns the successful probe count as a ratio string (e.g. "3/4").
+    pub fn success_ratio(&self) -> String {
+        format!("{}/{}", self.received, self.sent)
+    }
+
+    /// Returns a quality rating based on loss and latency.
+    pub fn quality(&self) -> &'static str {
+        if self.is_all_failed() {
+            return "unreachable";
+        }
+        match (self.loss_percent, self.avg_ms) {
+            (loss, _) if loss > 50.0 => "poor",
+            (loss, Some(avg)) if loss > 10.0 || avg > 200.0 => "fair",
+            (_, Some(avg)) if avg > 100.0 => "good",
+            _ => "excellent",
+        }
+    }
+}
+
+impl std::fmt::Display for PingStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "PING: {} ({})", self.target, self.resolved_addr)?;
+        for probe in &self.probes {
+            if probe.success {
+                writeln!(
+                    f,
+                    "  seq={} rtt={:.2} ms",
+                    probe.seq,
+                    probe.rtt_ms.unwrap_or(0.0)
+                )?;
+            } else {
+                writeln!(f, "  seq={} timeout", probe.seq)?;
+            }
+        }
+        writeln!(
+            f,
+            "  --- {} ping statistics ---",
+            self.target
+        )?;
+        writeln!(
+            f,
+            "  {} sent, {} received, {:.1}% loss",
+            self.sent, self.received, self.loss_percent
+        )?;
+        if let (Some(min), Some(avg), Some(max)) = (self.min_ms, self.avg_ms, self.max_ms) {
+            write!(f, "  rtt min/avg/max = {:.2}/{:.2}/{:.2} ms", min, avg, max)?;
+            if let Some(stddev) = self.stddev_ms {
+                write!(f, " (stddev {:.2} ms)", stddev)?;
+            }
+            if let Some(jitter) = self.jitter_ms {
+                write!(f, " jitter {:.2} ms", jitter)?;
+            }
+        } else {
+            write!(f, "  no successful probes")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for PingProbe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.success {
+            write!(
+                f,
+                "seq={} addr={} rtt={:.2} ms",
+                self.seq,
+                self.addr,
+                self.rtt_ms.unwrap_or(0.0)
+            )
+        } else {
+            write!(f, "seq={} addr={} timeout", self.seq, self.addr)
+        }
+    }
+}
+
 /// Resolve hostname to a socket address.
 fn resolve(target: &str, port: u16) -> Result<SocketAddr, String> {
     let host = format!("{target}:{port}");
@@ -368,5 +454,169 @@ mod tests {
         };
         let result = ping(&config).await;
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    fn make_stats(received: u32, lost: u32, rtts: Vec<f64>) -> PingStats {
+        let sent = received + lost;
+        let probes: Vec<PingProbe> = (0..sent)
+            .map(|i| {
+                if (i as usize) < rtts.len() {
+                    PingProbe {
+                        seq: i,
+                        success: true,
+                        rtt_ms: Some(rtts[i as usize]),
+                        addr: "127.0.0.1".to_string(),
+                    }
+                } else {
+                    PingProbe {
+                        seq: i,
+                        success: false,
+                        rtt_ms: None,
+                        addr: "127.0.0.1".to_string(),
+                    }
+                }
+            })
+            .collect();
+        let avg = if rtts.is_empty() {
+            None
+        } else {
+            Some(rtts.iter().sum::<f64>() / rtts.len() as f64)
+        };
+        let min = rtts.iter().cloned().reduce(f64::min);
+        let max = rtts.iter().cloned().reduce(f64::max);
+        let loss_percent = if sent > 0 {
+            lost as f64 / sent as f64 * 100.0
+        } else {
+            0.0
+        };
+        PingStats {
+            target: "example.com".to_string(),
+            resolved_addr: "93.184.216.34".to_string(),
+            probes,
+            sent,
+            received,
+            lost,
+            loss_percent,
+            min_ms: min,
+            avg_ms: avg,
+            max_ms: max,
+            stddev_ms: Some(0.5),
+            jitter_ms: Some(0.3),
+        }
+    }
+
+    #[test]
+    fn test_ping_stats_display_success() {
+        let stats = make_stats(4, 0, vec![10.0, 12.0, 11.0, 13.0]);
+        let output = format!("{stats}");
+        assert!(output.contains("PING: example.com"));
+        assert!(output.contains("93.184.216.34"));
+        assert!(output.contains("4 sent, 4 received, 0.0% loss"));
+        assert!(output.contains("rtt min/avg/max"));
+    }
+
+    #[test]
+    fn test_ping_stats_display_all_failed() {
+        let stats = make_stats(0, 4, vec![]);
+        let output = format!("{stats}");
+        assert!(output.contains("no successful probes"));
+        assert!(output.contains("100.0% loss"));
+    }
+
+    #[test]
+    fn test_ping_stats_display_partial() {
+        let stats = make_stats(2, 2, vec![10.0, 15.0]);
+        let output = format!("{stats}");
+        assert!(output.contains("timeout"));
+        assert!(output.contains("50.0% loss"));
+    }
+
+    #[test]
+    fn test_ping_probe_display_success() {
+        let probe = PingProbe {
+            seq: 0,
+            success: true,
+            rtt_ms: Some(12.34),
+            addr: "127.0.0.1".to_string(),
+        };
+        let output = format!("{probe}");
+        assert!(output.contains("seq=0"));
+        assert!(output.contains("12.34 ms"));
+    }
+
+    #[test]
+    fn test_ping_probe_display_failed() {
+        let probe = PingProbe {
+            seq: 3,
+            success: false,
+            rtt_ms: None,
+            addr: "127.0.0.1".to_string(),
+        };
+        let output = format!("{probe}");
+        assert!(output.contains("seq=3"));
+        assert!(output.contains("timeout"));
+    }
+
+    #[test]
+    fn test_is_all_success() {
+        let stats = make_stats(4, 0, vec![10.0, 12.0, 11.0, 13.0]);
+        assert!(stats.is_all_success());
+    }
+
+    #[test]
+    fn test_is_all_failed() {
+        let stats = make_stats(0, 4, vec![]);
+        assert!(stats.is_all_failed());
+    }
+
+    #[test]
+    fn test_not_all_success_with_loss() {
+        let stats = make_stats(2, 2, vec![10.0, 15.0]);
+        assert!(!stats.is_all_success());
+        assert!(!stats.is_all_failed());
+    }
+
+    #[test]
+    fn test_success_ratio() {
+        let stats = make_stats(3, 1, vec![10.0, 12.0, 11.0]);
+        assert_eq!(stats.success_ratio(), "3/4");
+    }
+
+    #[test]
+    fn test_quality_excellent() {
+        let stats = make_stats(4, 0, vec![10.0, 12.0, 11.0, 13.0]);
+        assert_eq!(stats.quality(), "excellent");
+    }
+
+    #[test]
+    fn test_quality_good() {
+        let mut stats = make_stats(4, 0, vec![150.0, 140.0, 130.0, 120.0]);
+        stats.avg_ms = Some(135.0);
+        assert_eq!(stats.quality(), "good");
+    }
+
+    #[test]
+    fn test_quality_fair() {
+        let mut stats = make_stats(3, 1, vec![10.0, 12.0, 11.0]);
+        stats.loss_percent = 25.0;
+        assert_eq!(stats.quality(), "fair");
+    }
+
+    #[test]
+    fn test_quality_poor() {
+        let mut stats = make_stats(1, 3, vec![10.0]);
+        stats.loss_percent = 75.0;
+        assert_eq!(stats.quality(), "poor");
+    }
+
+    #[test]
+    fn test_quality_unreachable() {
+        let stats = make_stats(0, 4, vec![]);
+        assert_eq!(stats.quality(), "unreachable");
     }
 }
