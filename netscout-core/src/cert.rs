@@ -178,6 +178,90 @@ pub fn inspect(config: &CertConfig) -> Result<CertResult, String> {
     })
 }
 
+impl CertInfo {
+    /// Check if this certificate is self-signed (subject equals issuer).
+    pub fn is_self_signed(&self) -> bool {
+        self.subject == self.issuer
+    }
+
+    /// Check if the certificate is expiring soon (within 30 days).
+    pub fn is_expiring_soon(&self) -> bool {
+        self.days_until_expiry >= 0 && self.days_until_expiry <= 30
+    }
+
+    /// Check if the certificate has already expired.
+    pub fn is_expired(&self) -> bool {
+        self.days_until_expiry < 0 && self.days_until_expiry != -1
+    }
+
+    /// Return a human-readable validity status.
+    pub fn validity_status(&self) -> &'static str {
+        if self.days_until_expiry == -1 {
+            "unknown"
+        } else if self.days_until_expiry < 0 {
+            "expired"
+        } else if self.days_until_expiry <= 30 {
+            "expiring soon"
+        } else {
+            "valid"
+        }
+    }
+}
+
+impl std::fmt::Display for CertInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{subject} (issuer: {issuer}, serial: {serial}, {status})",
+            subject = self.subject,
+            issuer = self.issuer,
+            serial = self.serial,
+            status = self.validity_status(),
+        )
+    }
+}
+
+impl CertResult {
+    /// Check if TLS 1.3 was negotiated.
+    pub fn is_tls13(&self) -> bool {
+        self.tls_version == "TLSv1.3"
+    }
+
+    /// Return the leaf (end-entity) certificate, if present.
+    pub fn leaf_cert(&self) -> Option<&CertInfo> {
+        self.certificate_chain.first()
+    }
+
+    /// Return the chain depth (number of certificates).
+    pub fn chain_depth(&self) -> usize {
+        self.certificate_chain.len()
+    }
+
+    /// Check if any certificate in the chain is expiring soon.
+    pub fn has_expiring_cert(&self) -> bool {
+        self.certificate_chain.iter().any(|c| c.is_expiring_soon())
+    }
+}
+
+impl std::fmt::Display for CertResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{host}:{port} — {tls} ({cipher}), chain depth {depth}, {time:.1}ms",
+            host = self.host,
+            port = self.port,
+            tls = self.tls_version,
+            cipher = self.cipher_suite,
+            depth = self.certificate_chain.len(),
+            time = self.connection_time_ms,
+        )?;
+        if let Some(ref w) = self.warning {
+            write!(f, " [{w}]")?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,4 +509,206 @@ mod tests {
         assert!(json.contains("TLSv1.3"));
         assert!(json.contains("75.5"));
     }
+
+    #[test]
+    fn test_cert_info_is_self_signed() {
+        let self_signed = CertInfo {
+            subject: "Root CA".into(),
+            issuer: "Root CA".into(),
+            not_before: "2020-01-01".into(),
+            not_after: "2030-01-01".into(),
+            days_until_expiry: 2000,
+            serial: "01".into(),
+            is_ca: true,
+        };
+        assert!(self_signed.is_self_signed());
+
+        let not_self_signed = CertInfo {
+            subject: "example.com".into(),
+            issuer: "Let's Encrypt".into(),
+            not_before: "2024-01-01".into(),
+            not_after: "2025-01-01".into(),
+            days_until_expiry: 180,
+            serial: "02".into(),
+            is_ca: false,
+        };
+        assert!(!not_self_signed.is_self_signed());
+    }
+
+    #[test]
+    fn test_cert_info_is_expiring_soon() {
+        let expiring = CertInfo {
+            subject: "test.com".into(),
+            issuer: "CA".into(),
+            not_before: "2024-01-01".into(),
+            not_after: "2024-02-01".into(),
+            days_until_expiry: 15,
+            serial: "AA".into(),
+            is_ca: false,
+        };
+        assert!(expiring.is_expiring_soon());
+
+        let healthy = CertInfo {
+            subject: "test.com".into(),
+            issuer: "CA".into(),
+            not_before: "2024-01-01".into(),
+            not_after: "2025-01-01".into(),
+            days_until_expiry: 180,
+            serial: "BB".into(),
+            is_ca: false,
+        };
+        assert!(!healthy.is_expiring_soon());
+    }
+
+    #[test]
+    fn test_cert_info_validity_status() {
+        let unknown = CertInfo {
+            subject: "t".into(), issuer: "t".into(),
+            not_before: "".into(), not_after: "".into(),
+            days_until_expiry: -1, serial: "".into(), is_ca: false,
+        };
+        assert_eq!(unknown.validity_status(), "unknown");
+
+        let expired = CertInfo {
+            subject: "t".into(), issuer: "t".into(),
+            not_before: "".into(), not_after: "".into(),
+            days_until_expiry: -30, serial: "".into(), is_ca: false,
+        };
+        assert_eq!(expired.validity_status(), "expired");
+
+        let expiring = CertInfo {
+            subject: "t".into(), issuer: "t".into(),
+            not_before: "".into(), not_after: "".into(),
+            days_until_expiry: 10, serial: "".into(), is_ca: false,
+        };
+        assert_eq!(expiring.validity_status(), "expiring soon");
+
+        let valid = CertInfo {
+            subject: "t".into(), issuer: "t".into(),
+            not_before: "".into(), not_after: "".into(),
+            days_until_expiry: 200, serial: "".into(), is_ca: false,
+        };
+        assert_eq!(valid.validity_status(), "valid");
+    }
+
+    #[test]
+    fn test_cert_info_display() {
+        let info = CertInfo {
+            subject: "example.com".into(),
+            issuer: "Let's Encrypt".into(),
+            not_before: "2024-01-01".into(),
+            not_after: "2025-01-01".into(),
+            days_until_expiry: 180,
+            serial: "AA:BB".into(),
+            is_ca: false,
+        };
+        let display = format!("{}", info);
+        assert!(display.contains("example.com"));
+        assert!(display.contains("Let's Encrypt"));
+        assert!(display.contains("AA:BB"));
+        assert!(display.contains("valid"));
+    }
+
+    #[test]
+    fn test_cert_result_is_tls13() {
+        let result = CertResult {
+            host: "test.com".into(), port: 443,
+            tls_version: "TLSv1.3".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![], connection_time_ms: 50.0,
+            warning: None,
+        };
+        assert!(result.is_tls13());
+
+        let result12 = CertResult {
+            host: "test.com".into(), port: 443,
+            tls_version: "TLSv1.2".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![], connection_time_ms: 50.0,
+            warning: None,
+        };
+        assert!(!result12.is_tls13());
+    }
+
+    #[test]
+    fn test_cert_result_leaf_cert() {
+        let result = CertResult {
+            host: "test.com".into(), port: 443,
+            tls_version: "TLSv1.3".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![
+                CertInfo {
+                    subject: "leaf.com".into(), issuer: "CA".into(),
+                    not_before: "".into(), not_after: "".into(),
+                    days_until_expiry: 100, serial: "01".into(), is_ca: false,
+                },
+            ],
+            connection_time_ms: 50.0, warning: None,
+        };
+        assert_eq!(result.leaf_cert().unwrap().subject, "leaf.com");
+        assert_eq!(result.chain_depth(), 1);
+
+        let empty = CertResult {
+            host: "t".into(), port: 443, tls_version: "".into(),
+            cipher_suite: "".into(), certificate_chain: vec![],
+            connection_time_ms: 0.0, warning: None,
+        };
+        assert!(empty.leaf_cert().is_none());
+        assert_eq!(empty.chain_depth(), 0);
+    }
+
+    #[test]
+    fn test_cert_result_has_expiring_cert() {
+        let result = CertResult {
+            host: "test.com".into(), port: 443,
+            tls_version: "TLSv1.3".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![
+                CertInfo {
+                    subject: "test.com".into(), issuer: "CA".into(),
+                    not_before: "".into(), not_after: "".into(),
+                    days_until_expiry: 5, serial: "01".into(), is_ca: false,
+                },
+            ],
+            connection_time_ms: 50.0, warning: None,
+        };
+        assert!(result.has_expiring_cert());
+    }
+
+    #[test]
+    fn test_cert_result_display() {
+        let result = CertResult {
+            host: "example.com".into(), port: 443,
+            tls_version: "TLSv1.3".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![
+                CertInfo {
+                    subject: "example.com".into(), issuer: "CA".into(),
+                    not_before: "".into(), not_after: "".into(),
+                    days_until_expiry: 100, serial: "01".into(), is_ca: false,
+                },
+            ],
+            connection_time_ms: 42.5, warning: None,
+        };
+        let display = format!("{}", result);
+        assert!(display.contains("example.com:443"));
+        assert!(display.contains("TLSv1.3"));
+        assert!(display.contains("chain depth 1"));
+        assert!(display.contains("42.5ms"));
+    }
+
+    #[test]
+    fn test_cert_result_display_with_warning() {
+        let result = CertResult {
+            host: "warn.com".into(), port: 443,
+            tls_version: "TLSv1.3".into(),
+            cipher_suite: "AES_256_GCM".into(),
+            certificate_chain: vec![],
+            connection_time_ms: 10.0,
+            warning: Some("expiring!".into()),
+        };
+        let display = format!("{}", result);
+        assert!(display.contains("[expiring!]"));
+    }
+
 }
